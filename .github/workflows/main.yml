@@ -20,6 +20,10 @@ jobs:
         postgis: ['3.5']
         variant: [default, alpine]
         include:
+          - postgres: 16
+            postgis: master
+            variant: default
+            runner-platform: 'ubuntu-24.04'
           - postgres: 18
             postgis: master
             variant: default

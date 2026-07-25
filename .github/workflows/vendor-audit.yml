@@ -1,0 +1,54 @@
+# Scheduled upstream-drift audit. Reports commits on upstream/master not yet on
+# convoy-vendor. Reporting only — never rewrites branches or publishes; the sync
+# is a reviewed manual merge (CONVOY-FORK.md). Invokes `make vendor-audit`.
+name: vendor-audit
+
+on:
+  schedule:
+    - cron: '17 6 * * 1' # weekly, Monday 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vendor-audit:
+    name: vendor audit (upstream drift)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (full history)
+        # actions/checkout v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Provide GNU Make 4.4+
+        run: |
+          set -euo pipefail
+          cd /tmp
+          curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz -o make.tgz
+          tar -xzf make.tgz
+          cd make-4.4.1
+          ./build.sh
+          sudo install -m 0755 make /usr/local/bin/make
+          make --version | head -1
+
+      - name: Provide upstream + convoy-vendor refs
+        run: |
+          set -euo pipefail
+          git fetch origin convoy-vendor:refs/heads/convoy-vendor
+          git remote add upstream https://github.com/postgis/docker-postgis.git
+          git fetch upstream master
+
+      - name: Vendor audit
+        run: make vendor-audit | tee vendor-audit-report.txt
+
+      - name: Upload report
+        # actions/upload-artifact v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vendor-audit-report
+          path: vendor-audit-report.txt
+          if-no-files-found: error

@@ -118,7 +118,7 @@ lint-actionlint:
 
 lint-zizmor:
 	@echo "lint: zizmor over .github/workflows"
-	@$(call resolve,zizmor) lint .github/workflows
+	@$(call resolve,zizmor) --collect=workflows .github/workflows
 
 lint-gitleaks:
 	@echo "lint: gitleaks over the repository tree"

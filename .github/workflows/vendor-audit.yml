@@ -25,15 +25,7 @@ jobs:
           persist-credentials: false
 
       - name: Provide GNU Make 4.4+
-        run: |
-          set -euo pipefail
-          cd /tmp
-          curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz -o make.tgz
-          tar -xzf make.tgz
-          cd make-4.4.1
-          ./build.sh
-          sudo install -m 0755 make /usr/local/bin/make
-          make --version | head -1
+        uses: ./.github/actions/provision-make
 
       - name: Provide upstream + convoy-vendor refs
         run: |

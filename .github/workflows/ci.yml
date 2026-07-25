@@ -29,17 +29,11 @@ jobs:
           persist-credentials: false
 
       # Ubuntu 24.04 ships GNU Make 4.3; TOOLSPEC requires 4.4+. Build the
-      # official 4.4.1 release with its dependency-free bootstrap (build.sh).
+      # official 4.4.1 release with its dependency-free bootstrap (build.sh),
+      # sha256-verified. Shared composite action keeps ci.yml and vendor-audit.yml
+      # in lockstep.
       - name: Provide GNU Make 4.4+
-        run: |
-          set -euo pipefail
-          cd /tmp
-          curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz -o make.tgz
-          tar -xzf make.tgz
-          cd make-4.4.1
-          ./build.sh
-          sudo install -m 0755 make /usr/local/bin/make
-          make --version | head -1
+        uses: ./.github/actions/provision-make
 
       # Populate the pinned tool cache from tools/tools.yaml (authoritative in CI).
       - name: Populate pinned tool cache

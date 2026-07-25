@@ -88,7 +88,7 @@ tools-audit: ## Report tool-cache state vs the manifest
 		else echo "  [oci?]   $$t ($$img) — not present; run 'make tools'"; fi; \
 	done
 
-validate: lint-actionlint lint-zizmor lint-shellcheck lint-dockerfile lint-gitleaks lint-markdownlint generated-check ## Run the full static-validation suite over Convoy-owned inputs
+validate: format lint-actionlint lint-zizmor lint-shellcheck lint-dockerfile lint-gitleaks lint-markdownlint generated-check ## Run the full static-validation suite over Convoy-owned inputs (shfmt + lints + generated-check)
 
 format: ## Check shell formatting (shfmt -d) on Convoy scripts
 	@echo "format: shfmt -d over scripts/*.sh"
@@ -147,6 +147,7 @@ smoke: ## Build the unmodified upstream 18-3.6 image natively
 vendor-audit: ## Report upstream commits not yet on convoy-vendor
 	@scripts/vendor-audit.sh
 
-# Local equivalent of the fast PR tier.
-presubmit: validate smoke ## format + validate + generated-check + smoke
+# Local equivalent of the fast PR tier. validate already includes format (shfmt),
+# the lint-* suite, and generated-check; smoke builds the upstream baseline.
+presubmit: validate smoke ## validate (shfmt + lints + generated-check) + smoke
 	@echo "presubmit: all Convoy gates green."

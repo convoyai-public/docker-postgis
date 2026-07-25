@@ -96,7 +96,7 @@ layers Convoy targets on top:
 | `generated-check` | Reject drift in committed generated output (extensible; no-op pass-through in WU1). |
 | `smoke` | Build the **unmodified upstream image** for one representative version (`18-3.6`) natively, proving the baseline builds. |
 | `vendor-audit` | Report upstream commits on `upstream/master` not present on `convoy-vendor`. |
-| `presubmit` | Local equivalent of the fast PR tier: `format` + `validate` + `generated-check` + `smoke`. |
+| `presubmit` | Local equivalent of the fast PR tier: `validate` (shfmt + lints + `generated-check`) + `smoke`. |
 
 Publish, sign, and multi-arch targets are **WU4** and are intentionally absent
 here.

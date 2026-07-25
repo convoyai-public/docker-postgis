@@ -40,28 +40,36 @@ rewrites `convoy-vendor` or `main` and never publishes a release without an
 operator decision (TOOLSPEC). The procedure is:
 
 1. Fetch upstream.
+
    ```bash
    git fetch upstream
    ```
+
 2. Fast-forward the pristine vendor mirror (no Convoy content here, ever).
+
    ```bash
    git checkout convoy-vendor
    git merge --ff-only upstream/master
    git push origin convoy-vendor
    ```
+
 3. Open a feature branch from `main` and merge the vendor mirror forward.
+
    ```bash
    git checkout main && git pull --ff-only
    git checkout -b sync/upstream-<short-sha>
    git merge convoy-vendor
    ```
+
 4. Resolve conflicts. The known conflict points are listed in
    [Deliberate divergences](#deliberate-divergences-from-upstream); each is
    intentionally owned by Convoy and re-applied on every merge.
 5. Run the local gate.
+
    ```bash
    gmake presubmit   # macOS; `make presubmit` on Linux
    ```
+
 6. Open a PR to `main`. The scheduled `make vendor-audit` reports upstream
    commits not yet on `convoy-vendor` (see [Vendor audit](#vendor-audit)) — it
    is a backstop, not the sync trigger.

@@ -1,0 +1,44 @@
+# Convoy CI for docker-postgres — thin plumbing only (TOOLSPEC: no build/test
+# policy in YAML). Invokes the same Make targets developers run locally.
+# Publish/sign/multi-arch are WU4; this tier only validates + builds the
+# unmodified upstream baseline.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  presubmit:
+    name: presubmit (validate + upstream baseline smoke)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        # actions/checkout v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      # Ubuntu 24.04 ships GNU Make 4.3; TOOLSPEC requires 4.4+. Build the
+      # official 4.4.1 release with its dependency-free bootstrap (build.sh),
+      # sha256-verified. Shared composite action keeps ci.yml and vendor-audit.yml
+      # in lockstep.
+      - name: Provide GNU Make 4.4+
+        uses: ./.github/actions/provision-make
+
+      # Populate the pinned tool cache from tools/tools.yaml (authoritative in CI).
+      - name: Populate pinned tool cache
+        run: make tools
+
+      # Fast PR tier, identical to `gmake presubmit` locally.
+      - name: Presubmit
+        run: make presubmit

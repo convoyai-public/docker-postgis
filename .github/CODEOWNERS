@@ -1,0 +1,7 @@
+# CODEOWNERS for the Convoy fork of postgis/docker-postgis.
+# https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# The whole tree is owned here so every PR requests review from the Convoy
+# packaging owner.
+# TODO: repoint to the Convoy packaging team.
+*                           @markfrommn

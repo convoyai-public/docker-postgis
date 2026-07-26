@@ -1,0 +1,14 @@
+# Hadolint configuration for Convoy-authored Dockerfiles.
+#
+# Scope note: `make validate` runs hadolint only over Convoy-authored
+# Dockerfiles (none exist in WU1). Upstream-generated Dockerfiles under
+# version directories (*/Dockerfile, */alpine/Dockerfile) and examples/ are
+# upstream-owned and are intentionally excluded from the gate. See
+# CONVOY-FORK.md "Validation scoping".
+---
+failure-threshold: warning
+format: tty
+no-color: false
+no-fail: false
+trustedRegistries:
+  - docker.io

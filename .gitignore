@@ -1,3 +1,5 @@
 _*
 # Convoy tool cache — populated by `make tools` from tools/tools.yaml; never committed.
 .tools/cache/
+# Local build artifacts — `make build-multiarch` writes the OCI manifest here; never committed.
+build/

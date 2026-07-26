@@ -53,7 +53,8 @@ resolve = $(shell scripts/tools-resolve.sh $(1))
 .PHONY: help tools tools-audit oci-tools \
         validate format format-apply lint lint-shellcheck lint-dockerfile \
         lint-actionlint lint-zizmor lint-gitleaks lint-markdownlint \
-        generated-check smoke vendor-audit presubmit
+        generated-check smoke smoke-arm64 smoke-amd64 smoke-multiarch smoke-native \
+        build-multiarch vendor-audit presubmit
 
 help: ## Show this help
 	@echo "Convoy fork of postgis/docker-postgis — targets"
@@ -62,7 +63,7 @@ help: ## Show this help
 	@echo "Local entry point: 'gmake' on macOS (GNU Make 4.4+), 'make' on Linux."
 	@echo "Pinned tools cache: make tools   (resolves .tools/cache/<host> from tools/tools.yaml)"
 	@echo ""
-	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n",$$1,$$2}'
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n",$$1,$$2}'
 	@echo ""
 	@echo "Static gates scope to Convoy-owned files (CONVOY-FORK.md \"Validation scoping\")."
 
@@ -139,15 +140,70 @@ generated-check: ## Reject drift in committed generated output (none registered 
 SMOKE_VERSION := 18-3.6
 SMOKE_REPO    ?= postgis
 SMOKE_IMAGE   ?= postgis
-smoke: ## Build the unmodified upstream 18-3.6 image natively
+smoke: ## Build the unmodified upstream 18-3.6 image natively (baseline; build-only)
 	@echo "smoke: building unmodified upstream $(SMOKE_REPO)/$(SMOKE_IMAGE):$(SMOKE_VERSION) (native arch)..."
 	@$(DOCKER) build --pull -t $(SMOKE_REPO)/$(SMOKE_IMAGE):$(SMOKE_VERSION) $(SMOKE_VERSION)
 	@echo "smoke: built $(SMOKE_REPO)/$(SMOKE_IMAGE):$(SMOKE_VERSION)"
+
+# --- WU2: ARM build enablement -------------------------------------------------
+# Per-arch RUNNABLE smokes (buildx --load + run + CREATE EXTENSION postgis + a
+# spatial op). These prove the image is runnable on each arch, not merely
+# buildable — the heart of WU2. scripts/smoke-run.sh is the executable AC proof.
+# Buildx is a TOOLSPEC host prerequisite; no new toolchain. Publish/sign/registry
+# stays WU4; build-multiarch only assembles a local manifest, it never publishes.
+SMOKE_CONTEXT := $(SMOKE_VERSION)
+
+smoke-arm64: ## Runnable smoke: build + run 18-3.6 on linux/arm64
+	@scripts/smoke-run.sh arm64 $(SMOKE_CONTEXT)
+
+smoke-amd64: ## Runnable smoke: build + run 18-3.6 on linux/amd64 (emulated on Apple Silicon)
+	@scripts/smoke-run.sh amd64 $(SMOKE_CONTEXT)
+
+smoke-multiarch: smoke-arm64 smoke-amd64 ## Runnable smoke on BOTH arches (amd64 emulated on Apple Silicon)
+
+# Runnable smoke for the Docker daemon's native arch (fast everywhere; no
+# emulation). Detected from `docker info` so it is correct on Apple Silicon
+# (arm64) and on x86 Linux/CI (amd64).
+smoke-native: ## Runnable smoke for the daemon-native arch (fast; used by presubmit)
+	@arch=$$(docker info --format '{{.Architecture}}' \
+		| sed -e 's/aarch64/arm64/' -e 's/x86_64/amd64/'); \
+	echo "smoke-native: daemon arch=$$arch"; \
+	scripts/smoke-run.sh "$$arch" $(SMOKE_CONTEXT)
+
+# Assemble a local multi-arch manifest (linux/amd64,linux/arm64) to an OCI
+# layout tarball WITHOUT publishing. Proves both arches build into one manifest.
+# --load cannot carry multiple platforms, so multi-arch uses --output type=oci.
+MULTIARCH_TARBALL := build/$(SMOKE_REPO)-$(SMOKE_VERSION)-multiarch.oci.tar
+build-multiarch: ## Assemble a local multi-arch manifest (amd64+arm64) without publishing
+	@mkdir -p $(dir $(MULTIARCH_TARBALL))
+	@echo "build-multiarch: assembling linux/amd64,linux/arm64 manifest -> $(MULTIARCH_TARBALL)"
+	@$(DOCKER) buildx build --platform linux/amd64,linux/arm64 \
+		--output type=oci,dest=$(MULTIARCH_TARBALL) $(SMOKE_VERSION)
+	@echo "build-multiarch: manifest assembled at $(MULTIARCH_TARBALL)"
+	@# Positive assertion: the assembled OCI tarball's manifest-list blob must
+	@# carry BOTH linux/amd64 and linux/arm64. imagetools inspect is registry-only
+	@# and cannot read a local OCI tarball, so parse the layout we wrote: the
+	@# index.json image-index descriptor digest -> blobs/sha256/<hex> manifest list,
+	@# then grep each platform's architecture. No new toolchain (tar/sed/grep only).
+	@idx=$$(tar -xOf $(MULTIARCH_TARBALL) index.json); \
+	digest=$$(printf '%s\n' "$$idx" | sed -n 's/.*"digest":"sha256:\([0-9a-f]\{64\}\)".*/\1/p' | head -n1); \
+	manifest=$$(tar -xOf $(MULTIARCH_TARBALL) "blobs/sha256/$$digest"); \
+	for arch in amd64 arm64; do \
+		printf '%s\n' "$$manifest" | grep -Eq "\"architecture\":[[:space:]]*\"$$arch\"" || { \
+			echo "build-multiarch: assembled manifest missing architecture $$arch" >&2; \
+			echo "---- manifest-list blob (blobs/sha256/$$digest) ----" >&2; \
+			printf '%s\n' "$$manifest" >&2; \
+			exit 1; \
+		}; \
+	done; \
+	echo "[build-multiarch] manifest carries linux/amd64 + linux/arm64"
 
 vendor-audit: ## Report upstream commits not yet on convoy-vendor
 	@scripts/vendor-audit.sh
 
 # Local equivalent of the fast PR tier. validate already includes format (shfmt),
-# the lint-* suite, and generated-check; smoke builds the upstream baseline.
-presubmit: validate smoke ## validate (shfmt + lints + generated-check) + smoke
+# the lint-* suite, and generated-check; smoke-native builds AND RUNS the
+# upstream 18-3.6 image on the daemon-native arch (fast; no emulation), proving
+# the baseline is runnable, not merely buildable.
+presubmit: validate smoke-native ## validate (shfmt + lints + generated-check) + native runnable smoke
 	@echo "presubmit: all Convoy gates green."

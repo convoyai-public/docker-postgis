@@ -5,7 +5,7 @@
 #
 # Builds the image for the target arch as a loadable single-arch image, starts a
 # detached Postgres container, waits for it to accept connections, then asserts:
-#   - CREATE EXTENSION IF NOT EXISTS postgis succeeds
+#   - the postgis extension is installed (read-only check; performs no DDL)
 #   - postgis_full_version() reports a non-empty POSTGIS= string
 #   - a basic spatial op (ST_Distance on two geometry points) returns 5
 # Structured [smoke-<arch>] markers go to stdout; failures go to stderr with a
@@ -73,7 +73,7 @@ docker run -d --name "$container" --platform "linux/${arch}" \
 # Wait for Postgres to accept connections. 120s is generous for amd64 emulation.
 echo "[smoke-${arch}] WAIT readiness (pg_isready)"
 deadline=$((SECONDS + 120))
-until docker exec "$container" pg_isready -U postgres >/dev/null 2>&1; do
+until docker exec "$container" pg_isready -h 127.0.0.1 -p 5432 -U postgres >/dev/null 2>&1; do
 	if ((SECONDS >= deadline)); then
 		echo "[smoke-${arch}] FAIL: Postgres not ready within 120s" >&2
 		docker logs "$container" >&2 2>&1 || true
@@ -100,11 +100,21 @@ psql() {
 	return "$rc"
 }
 
-# Assertion 1: CREATE EXTENSION succeeds (set -e makes non-zero fatal). IF NOT
-# EXISTS keeps it idempotent even though initdb-postgis.sh already loads postgis
-# during init.
-psql "CREATE EXTENSION IF NOT EXISTS postgis;" >/dev/null
-echo "[smoke-${arch}] CREATE EXTENSION postgis: ok"
+# Assertion 1: postgis is installed. The entrypoint's init script
+# (10_postgis.sh) already runs "CREATE EXTENSION IF NOT EXISTS postgis" during
+# init, so the smoke only VERIFIES the row exists (read-only). Performing DDL
+# here would re-run that same statement concurrently with the init script under
+# the temp init server: "CREATE EXTENSION IF NOT EXISTS" is check-then-insert
+# and is not atomic, so the loser hits a duplicate key on pg_extension_name_index
+# and (with ON_ERROR_STOP=1) aborts init -> container exit 3. Read-only here
+# eliminates that race. set -e makes a failed psql exec (e.g. stopped container)
+# fatal regardless.
+postgis_count=$(psql "SELECT count(*) FROM pg_extension WHERE extname = 'postgis';")
+if [[ "$postgis_count" != "1" ]]; then
+	echo "[smoke-${arch}] FAIL: postgis extension not installed (count='${postgis_count:-<empty>}'; expected 1)" >&2
+	exit 1
+fi
+echo "[smoke-${arch}] postgis installed: ok"
 
 # Assertion 2: postgis_full_version() reports a non-empty POSTGIS= string.
 pgver=$(psql "SELECT postgis_full_version();")

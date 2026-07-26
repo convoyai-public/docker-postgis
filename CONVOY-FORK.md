@@ -94,12 +94,17 @@ layers Convoy targets on top:
 | `validate` | Run the static validators (actionlint, Zizmor, Hadolint, ShellCheck, shfmt, Gitleaks, markdownlint) over **Convoy-owned** inputs. |
 | `format` / `lint` | Format check / lint. |
 | `generated-check` | Reject drift in committed generated output (extensible; no-op pass-through in WU1). |
-| `smoke` | Build the **unmodified upstream image** for one representative version (`18-3.6`) natively, proving the baseline builds. |
+| `smoke` | Build the **unmodified upstream image** for one representative version (`18-3.6`) natively, proving the baseline builds (build-only; WU1). |
+| `smoke-arm64` / `smoke-amd64` | **Runnable** per-arch smoke (WU2): buildx `--load` + run a container + `CREATE EXTENSION postgis` + `postgis_full_version()` + a spatial op. Proves the image is *runnable* on each arch, not merely buildable. `smoke-amd64` is emulated on Apple Silicon. |
+| `smoke-native` | Runnable smoke for the Docker daemon's native arch (fast; no emulation). Used by `presubmit`. |
+| `smoke-multiarch` | Runnable smoke on **both** arches (`smoke-arm64` + `smoke-amd64`). |
+| `build-multiarch` | Assemble a local **multi-arch manifest** (`linux/amd64,linux/arm64`) to an OCI-layout tarball under `build/` **without publishing**. Proves both arches build into one manifest. |
 | `vendor-audit` | Report upstream commits on `upstream/master` not present on `convoy-vendor`. |
-| `presubmit` | Local equivalent of the fast PR tier: `validate` (shfmt + lints + `generated-check`) + `smoke`. |
+| `presubmit` | Local equivalent of the fast PR tier: `validate` (shfmt + lints + `generated-check`) + `smoke-native` (runnable native-arch smoke). |
 
-Publish, sign, and multi-arch targets are **WU4** and are intentionally absent
-here.
+Local **multi-arch assembly** (`build-multiarch`) and **runnable per-arch smoke**
+(`smoke-*`) are WU2. **Publish, sign, and registry** targets remain **WU4** and
+are intentionally absent here; `build-multiarch` writes only a local OCI tarball.
 
 ## Validation scoping (important)
 
@@ -151,3 +156,73 @@ Everything else Convoy adds is **new files alongside upstream** (`CONVOY-FORK.md
 `.github/workflows/vendor-audit.yml`, `.github/CODEOWNERS`,
 `.markdownlint-cli2.jsonc`, `.hadolint.yaml`), so vendor merges never touch
 them.
+
+## WU2: ARM build enablement
+
+ENG-518 ports the *intent* of the local clone's `mark/enable-arm-builds`
+(`3975a0e`) — multi-arch buildx + native-arch runnable smoke, amd64 preserved —
+onto the fork's **product image `18-3.6`** and the fork's **`GNUmakefile`** front
+door. It does **not** replay `3975a0e` literally:
+
+- `3975a0e` bumps `PROJ/GDAL/POSTGIS_GIT_HASH` in the **source-build**
+  `16-master`/`17-master` Dockerfiles (those compile the geo stack from git; the
+  old hashes fail to compile on arm64) and switches the **upstream** `Makefile`
+  `build-$(version)` macro to `docker buildx build --platform linux/amd64,linux/arm64`.
+- The Convoy product image `18-3.6/Dockerfile` is **28 lines, apt-package-based**
+  (`FROM docker.io/postgres:18-trixie` + `postgresql-18-postgis-3` from the PGDG
+  apt repo). It compiles nothing and pins no git hashes; the base image and PGDG
+  both ship arm64, so it is already arm64-compatible. The source-build
+  `16/17/18-master` images are **not** Convoy product and are out of scope.
+
+So: no source-hash bump is needed, the upstream `Makefile` is untouched (per the
+`-include Makefile` vendor-clean pattern), and all new targets layer in
+`GNUmakefile` + `scripts/smoke-run.sh`. The `3975a0e` hash-bump technique is
+recorded here as the recipe to reuse **if** a source-build image is ever
+productized on arm64.
+
+**Design notes:**
+
+- `build-multiarch` assembles a multi-arch manifest for
+  `linux/amd64,linux/arm64` to a **local** OCI-layout tarball
+  (`build/<repo>-<ver>-multiarch.oci.tar`, gitignored) via
+  `docker buildx build --output type=oci,dest=...`. It does **not** publish
+  (publish/sign/registry is WU4). `--load` is intentionally not used here:
+  `--load` cannot carry more than one platform, so multi-arch proof uses
+  `--output type=oci` instead.
+- `smoke-arm64`/`smoke-amd64` build a **loadable single-arch** image
+  (`buildx --platform linux/<arch> --load`) and then **run** it
+  (`docker run --platform linux/<arch>`), wait on `pg_isready`, and assert
+  `CREATE EXTENSION postgis`, `postgis_full_version()`, and a 3-4-5 spatial
+  distance. `smoke-amd64` runs under QEMU emulation on Apple Silicon; both pass.
+- `presubmit` runs `validate` + `smoke-native` (the daemon-native runnable
+  smoke), so the fast PR tier now proves the baseline is **runnable**, not just
+  buildable. `smoke` (build-only) remains as a standalone quick check.
+
+**Warn-not-gate ARM posture for 18-3.6 (finding for WU4):** the apt-based
+`18-3.6` image has **no fragile ARM source-build test surface**. The upstream
+regress-suite flakiness that motivates a warn-not-gate posture lives in the
+source-build `16/17-master` images (PROJ/GDAL/PostGIS compiled from git, with
+their full `make check`/regress suites). For `18-3.6`, PostGIS 3.6.4 is installed
+as a **prebuilt PGDG Debian package**; PGDG build and test it upstream, and this
+fork runs **no** geo source test suites. The only test surface is the runnable
+extension smoke, whose assertions (`postgis_full_version()` reports, exact 3-4-5
+`ST_Distance`) are deterministic and arch-independent. **Recommendation for
+WU4:** the runnable extension smoke should fully **gate** for `18-3.6`; there is
+nothing to relax into a warn for this image. The warn-not-gate knob only becomes
+relevant if a source-build image is productized — then the `3975a0e` hash recipe
+and the upstream regress-suite arm64 flakiness would apply.
+
+**Local mode caveat (macOS):** the postgres entrypoint *sources*
+`/docker-entrypoint-initdb.d/10_postgis.sh` as the `postgres` user, so the file
+must be world-readable. Git tracks it as mode `100644` (the intended, clean state
+on Linux/CI), but some macOS checkouts land it at `0640`, which breaks container
+init (`Permission denied`) and is invisible to `git status` (git tracks only the
+execute bit). If a runnable smoke fails with `Permission denied` on
+`10_postgis.sh`, fix the working-tree mode to match the committed intent:
+
+```bash
+chmod 0644 initdb-postgis.sh 18-3.6/initdb-postgis.sh
+```
+
+This is a filesystem-mode correction, not a content edit; it creates no
+vendor-merge conflict and leaves `git status` clean.

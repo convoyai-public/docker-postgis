@@ -111,7 +111,7 @@ are intentionally absent here; `build-multiarch` writes only a local OCI tarball
 The static gates guard **Convoy-owned inputs only**:
 
 - ShellCheck / shfmt lint `scripts/*.sh` (Convoy's thin Bash 5 helpers).
-- Hadolint lints Convoy-authored Dockerfiles (none in WU1).
+- Hadolint lints Convoy-authored Dockerfiles (e.g. `dockerfiles/18-3.6.dockerfile`).
 - actionlint / Zizmor lint `.github/workflows/*.yml` (Convoy-owned).
 - markdownlint lints Convoy-authored Markdown (this file; the README banner
   block).
@@ -250,7 +250,7 @@ not a C compile.
   (`FROM postgres:18-trixie`) installs `postgresql-server-dev-18` + build deps,
   shallow-clones the `v1.10.0` tag, and runs
   `make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install`. The final stage
-  reproduces the upstream PostGIS apt layer verbatim (`POSTGIS_VERSION` pinned,
+  reproduces the upstream PostGIS apt layer (functionally equivalent — `POSTGIS_VERSION` pinned,
   `--no-install-recommends`, list cleanup) and `COPY --from=pgmq-builder` the
   pgmq extension files into `/usr/share/postgresql/18/extension/`.
 - **No shared-library COPY.** Verified by inspecting the builder output: pgmq

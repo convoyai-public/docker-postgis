@@ -172,7 +172,12 @@ if ! psql "CREATE EXTENSION pgmq;" >/dev/null 2>&1; then
 fi
 echo "[smoke-${arch}] pgmq extension created: ok"
 
-psql "SELECT pgmq.create('smoke_queue');" >/dev/null
+if ! psql "SELECT pgmq.create('smoke_queue');" >/dev/null 2>&1; then
+	echo "[smoke-${arch}] FAIL: pgmq.create('smoke_queue') failed" >&2
+	exit 1
+fi
+echo "[smoke-${arch}] pgmq queue created: smoke_queue"
+
 sent_id=$(psql "SELECT pgmq.send('smoke_queue', '{\"ping\": \"pong\"}'::jsonb);")
 if [[ -z "${sent_id}" ]]; then
 	echo "[smoke-${arch}] FAIL: pgmq.send returned no msg_id" >&2

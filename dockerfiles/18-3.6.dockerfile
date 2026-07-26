@@ -50,7 +50,7 @@ LABEL org.opencontainers.image.description="PostGIS 3.6.4 + pgmq 1.10.0 on Postg
 ENV POSTGIS_MAJOR=3
 ENV POSTGIS_VERSION=3.6.4+dfsg-2.pgdg13+1
 
-# PostGIS layer: identical to upstream 18-3.6/Dockerfile (pinned postgis,
+# PostGIS layer: mirrors upstream 18-3.6/Dockerfile (pinned postgis,
 # --no-install-recommends, list cleanup). ca-certificates and the -scripts
 # package are unpinned to match upstream exactly.
 # hadolint ignore=DL3008

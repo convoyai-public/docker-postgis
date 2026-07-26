@@ -44,7 +44,7 @@ OCI_TOOLS    := markdownlint-cli2
 # Convoy-owned validation inputs (upstream-owned files are excluded; see CONVOY-FORK.md).
 SHELL_SCRIPTS  := $(wildcard scripts/*.sh)
 WORKFLOWS      := $(wildcard .github/workflows/*.yml)
-CONVOY_DOCKERFILES := $(wildcard dockerfiles/*.dockerfile)  # none in WU1
+CONVOY_DOCKERFILES := $(wildcard dockerfiles/*.dockerfile)  # Convoy-authored product Dockerfiles
 MARKDOWN_FILES := CONVOY-FORK.md
 
 # Resolve a tool: pinned cache first, then PATH (tools-resolve.sh warns on fallback).
@@ -211,7 +211,7 @@ vendor-audit: ## Report upstream commits not yet on convoy-vendor
 
 # Local equivalent of the fast PR tier. validate already includes format (shfmt),
 # the lint-* suite, and generated-check; smoke-native builds AND RUNS the
-# upstream 18-3.6 image on the daemon-native arch (fast; no emulation), proving
-# the baseline is runnable, not merely buildable.
+# Convoy product image (18-3.6 + pgmq) on the daemon-native arch (fast; no
+# emulation), proving the product image is runnable, not merely buildable.
 presubmit: validate smoke-native ## validate (shfmt + lints + generated-check) + native runnable smoke
 	@echo "presubmit: all Convoy gates green."

@@ -180,6 +180,23 @@ build-multiarch: ## Assemble a local multi-arch manifest (amd64+arm64) without p
 	@$(DOCKER) buildx build --platform linux/amd64,linux/arm64 \
 		--output type=oci,dest=$(MULTIARCH_TARBALL) $(SMOKE_VERSION)
 	@echo "build-multiarch: manifest assembled at $(MULTIARCH_TARBALL)"
+	@# Positive assertion: the assembled OCI tarball's manifest-list blob must
+	@# carry BOTH linux/amd64 and linux/arm64. imagetools inspect is registry-only
+	@# and cannot read a local OCI tarball, so parse the layout we wrote: the
+	@# index.json image-index descriptor digest -> blobs/sha256/<hex> manifest list,
+	@# then grep each platform's architecture. No new toolchain (tar/sed/grep only).
+	@idx=$$(tar -xOf $(MULTIARCH_TARBALL) index.json); \
+	digest=$$(printf '%s\n' "$$idx" | sed -n 's/.*"digest":"sha256:\([0-9a-f]\{64\}\)".*/\1/p' | head -n1); \
+	manifest=$$(tar -xOf $(MULTIARCH_TARBALL) "blobs/sha256/$$digest"); \
+	for arch in amd64 arm64; do \
+		printf '%s\n' "$$manifest" | grep -Eq "\"architecture\":[[:space:]]*\"$$arch\"" || { \
+			echo "build-multiarch: assembled manifest missing architecture $$arch" >&2; \
+			echo "---- manifest-list blob (blobs/sha256/$$digest) ----" >&2; \
+			printf '%s\n' "$$manifest" >&2; \
+			exit 1; \
+		}; \
+	done; \
+	echo "[build-multiarch] manifest carries linux/amd64 + linux/arm64"
 
 vendor-audit: ## Report upstream commits not yet on convoy-vendor
 	@scripts/vendor-audit.sh

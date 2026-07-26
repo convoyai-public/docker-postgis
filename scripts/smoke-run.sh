@@ -41,12 +41,29 @@ echo "[smoke-${arch}] START platform=linux/${arch} image=${tag} context=${rel}"
 echo "[smoke-${arch}] BUILD (buildx --load; amd64 is emulated on Apple Silicon)"
 docker buildx build --platform "linux/${arch}" --load -t "$tag" "$context"
 
+# On any non-zero exit, capture why the container died BEFORE cleanup removes
+# it. Every docker call in the trap is guarded (|| true) so the trap itself
+# never masks the original error. Happy-path exits (rc 0) skip diagnostics,
+# so a passing smoke stays quiet.
+dump_diag() {
+	local rc=$1
+	[[ $rc -ne 0 ]] || return 0
+	[[ -n "${container:-}" ]] || return 0
+	echo "[smoke-${arch}] DIAG exit=${rc}: capturing container state + logs" >&2
+	docker inspect --format \
+		'{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} err={{.State.Error}} startedAt={{.State.StartedAt}} finishedAt={{.State.FinishedAt}}' \
+		"$container" >&2 2>&1 || true
+	echo "[smoke-${arch}] DIAG docker logs:" >&2
+	docker logs "$container" >&2 2>&1 || true
+}
+
 cleanup() {
 	if [[ -n "${container:-}" ]]; then
 		docker rm -f "$container" >/dev/null 2>&1 || true
 	fi
 }
-trap cleanup EXIT
+
+trap 'rc=$?; dump_diag "$rc"; cleanup' EXIT
 
 echo "[smoke-${arch}] RUN container=${container}"
 docker run -d --name "$container" --platform "linux/${arch}" \
@@ -66,7 +83,22 @@ until docker exec "$container" pg_isready -U postgres >/dev/null 2>&1; do
 done
 echo "[smoke-${arch}] READY"
 
-psql() { docker exec "$container" psql -U postgres -d postgres -tAc "$@"; }
+# Run an assertion psql. A stopped container yields only a bare daemon error
+# from docker exec, so on failure detect that case and print an explicit FAIL
+# line before set -e aborts (the EXIT trap's DIAG dump then follows). Returns
+# the exec's rc so non-zero still propagates and fails the script.
+psql() {
+	local rc=0
+	docker exec "$container" psql -U postgres -d postgres -tAc "$@" || rc=$?
+	if [[ $rc -ne 0 ]]; then
+		local status
+		status=$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || echo unknown)
+		if [[ "$status" != "running" ]]; then
+			echo "[smoke-${arch}] FAIL: container stopped before/during assertion (see DIAG output above)" >&2
+		fi
+	fi
+	return "$rc"
+}
 
 # Assertion 1: CREATE EXTENSION succeeds (set -e makes non-zero fatal). IF NOT
 # EXISTS keeps it idempotent even though initdb-postgis.sh already loads postgis

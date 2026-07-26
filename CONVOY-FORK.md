@@ -226,3 +226,63 @@ chmod 0644 initdb-postgis.sh 18-3.6/initdb-postgis.sh
 
 This is a filesystem-mode correction, not a content edit; it creates no
 vendor-merge conflict and leaves `git status` clean.
+
+## WU3: pgmq bundling into the image
+
+ENG-519 bundles [pgmq](https://github.com/pgmq/pgmq) into the `convoy-postgres`
+product image (it is absent from the interim `markfrommn/postgis` image). pgmq
+has no PGDG apt package, so it is built from source and layered on the same
+PostGIS layer the upstream image ships. The first compound tag (`PG-major –
+PostGIS – pgmq`) is cut in WU5; WU3 only bundles pgmq and records its version.
+
+**Pinned source:** `https://github.com/pgmq/pgmq` at tag **`v1.10.0`**
+(full version `1.10.0`). The upstream README lists PostgreSQL 14–17; pgmq 1.10.0
+is a **pure-SQL extension** (39 plpgsql + 15 sql functions, no C, no `.so`), so
+it is version-portable, and PG18 support is proven by the runnable smoke below.
+The build is therefore a PGXS `make install` against the PG18 server headers,
+not a C compile.
+
+**Design notes:**
+
+- pgmq is delivered by a **new Convoy-authored multi-stage Dockerfile**
+  (`dockerfiles/18-3.6.dockerfile`); the upstream-generated `18-3.6/Dockerfile`
+  is **not edited** (vendor-merge cleanliness). A `pgmq-builder` stage
+  (`FROM postgres:18-trixie`) installs `postgresql-server-dev-18` + build deps,
+  shallow-clones the `v1.10.0` tag, and runs
+  `make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install`. The final stage
+  reproduces the upstream PostGIS apt layer verbatim (`POSTGIS_VERSION` pinned,
+  `--no-install-recommends`, list cleanup) and `COPY --from=pgmq-builder` the
+  pgmq extension files into `/usr/share/postgresql/18/extension/`.
+- **No shared-library COPY.** Verified by inspecting the builder output: pgmq
+  1.10.0 ships only `pgmq.control` + the `pgmq--*.sql` transition files (the
+  control file's `module_pathname = '$libdir/pgmq'` is a harmless stale field —
+  the SQL contains no `MODULE_PATHNAME` substitutions and no `LANGUAGE C`
+  functions). The COPY is a single datadir glob, `pgmq*`. Build context is the
+  repo root (`.`) so `18-3.6/initdb-postgis.sh` is in context.
+- The **runnable smokes and `build-multiarch`** now build the Convoy product
+  Dockerfile (`-f dockerfiles/18-3.6.dockerfile`, context `.`); the build-only
+  baseline `smoke` **stays on the unmodified upstream image** so it keeps
+  proving the upstream baseline builds (WU1 intent). `scripts/smoke-run.sh`
+  gained an optional dockerfile argument and a pgmq assertion.
+- **Smoke round-trip proof:** after the TCP readiness gate and the read-only
+  postgis checks, the smoke runs `CREATE EXTENSION pgmq` (the sole creator —
+  pgmq has no initdb-script creator, so there is no check-then-insert race) and
+  a queue round-trip. The pgmq control file pins `schema = pgmq` (not on the
+  default `search_path`), so every call is schema-qualified against the v1.10.0
+  signatures verified in `pgmq-extension/sql/pgmq.sql`:
+  `pgmq.create(text)`, `pgmq.send(text, jsonb)` (returns `SETOF bigint`),
+  `pgmq.read(text, vt int, qty int)` (returns `SETOF pgmq.message_record`,
+  whose `message jsonb` column carries the payload). Both arches pass:
+  `[smoke-<arch>] pgmq round-trip: send msg_id=1, read payload='pong'`.
+- **Hadolint posture:** both `apt-get install` lines carry a justified
+  `# hadolint ignore=DL3008` — the builder's build deps are unpinned by design
+  (throwaway stage), and the final stage matches upstream's exact pattern
+  (pinned `postgresql-18-postgis-3`, unpinned `ca-certificates` and `-scripts`).
+  `failure-threshold: warning` is met with zero warning/error findings.
+
+**Compound-tag-suffix input for WU5:** the recommended suffix is **`-pgmq1.10`**
+(minor only, matching the spec's `pgmqX.Y` convention in the compound tag
+`18-3.6-pgmqX.Y`); the full recorded pgmq version is `1.10.0`. WU5 cuts the
+actual tag; WU3 only captures the version. The Phase 1 plan's `1.5`/`pgmq1.5`
+placeholders were illustrative (`e.g.`); `1.10.0` is the pinned reality recorded
+here.

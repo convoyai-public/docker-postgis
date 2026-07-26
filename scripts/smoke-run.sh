@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
 # Runnable per-architecture container smoke for the 18-3.6 PostGIS image.
 #
-# Usage: smoke-run.sh <arm64|amd64> [context-dir]
+# Usage: smoke-run.sh <arm64|amd64> [context-dir] [dockerfile]
 #
 # Builds the image for the target arch as a loadable single-arch image, starts a
 # detached Postgres container, waits for it to accept connections, then asserts:
 #   - the postgis extension is installed (read-only check; performs no DDL)
 #   - postgis_full_version() reports a non-empty POSTGIS= string
 #   - a basic spatial op (ST_Distance on two geometry points) returns 5
+#   - pgmq can be CREATE EXTENSIONed and a queue round-trip returns the payload
 # Structured [smoke-<arch>] markers go to stdout; failures go to stderr with a
 # non-zero exit. The container is removed on any exit (trap). This script is the
-# executable verification of the WU2 acceptance criteria: the built image is
-# RUNNABLE on each arch, not merely buildable.
+# executable verification of the WU2 + WU3 acceptance criteria: the built image
+# is RUNNABLE on each arch and carries both PostGIS and pgmq, not merely
+# buildable.
+#
+# The optional [dockerfile] argument selects a Convoy-authored Dockerfile (e.g.
+# dockerfiles/18-3.6.dockerfile, the WU3 pgmq-bearing product image) and is
+# passed to buildx as -f. When omitted, the upstream image in [context-dir] is
+# built unchanged (the WU1 baseline behavior).
 #
 # Thin Convoy helper (CONVOY-FORK.md). No publish/registry logic (that is WU4).
 # Buildx is a TOOLSPEC host prerequisite; this script adds no new toolchain.
 
 set -euo pipefail
 
-arch=${1:?usage: smoke-run.sh <arm64|amd64> [context-dir]}
+arch=${1:?usage: smoke-run.sh <arm64|amd64> [context-dir] [dockerfile]}
 case "$arch" in
 arm64 | amd64) ;;
 *)
@@ -29,17 +36,27 @@ esac
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 context=${2:-$root/18-3.6}
+dockerfile=${3:-}
 version=18-3.6
 tag="convoy-postgres:${version}-smoke-${arch}"
 container="convoy-postgres-smoke-${arch}-$$"
 
-rel=${context#"$root/"}
+# Relative context for the START marker. When the Convoy product Dockerfile is
+# selected the context is the repo root, which collapses to ".".
+rel=${context#"$root"}
+rel=${rel#/}
+rel=${rel:-.}
 
 echo "[smoke-${arch}] START platform=linux/${arch} image=${tag} context=${rel}"
 
 # Build a loadable single-arch image. --load requires exactly one --platform.
+# When a Convoy Dockerfile is supplied, pass it via -f (context stays the arg).
 echo "[smoke-${arch}] BUILD (buildx --load; amd64 is emulated on Apple Silicon)"
-docker buildx build --platform "linux/${arch}" --load -t "$tag" "$context"
+if [[ -n "$dockerfile" ]]; then
+	docker buildx build --platform "linux/${arch}" --load -f "$dockerfile" -t "$tag" "$context"
+else
+	docker buildx build --platform "linux/${arch}" --load -t "$tag" "$context"
+fi
 
 # On any non-zero exit, capture why the container died BEFORE cleanup removes
 # it. Every docker call in the trap is guarded (|| true) so the trap itself
@@ -132,5 +149,46 @@ if [[ "$dist" != "5" ]]; then
 	exit 1
 fi
 echo "[smoke-${arch}] spatial op ST_Distance((0,0),(3,4)) = ${dist}"
+
+# Assertion 4 (WU3): pgmq is bundled and a queue round-trip works.
+#
+# Unlike postgis, pgmq has NO initdb-script creator, so CREATE EXTENSION pgmq
+# here is the sole creator. There is therefore no check-then-insert race with
+# the init server, and the plain CREATE is safe. It still MUST run after the
+# TCP readiness gate above (pg_isready -h 127.0.0.1), which discriminates the
+# post-init real server from the Unix-socket-only temp init server — see
+# CONVOY-FORK.md "Postgres smoke readiness race". Ordering is: TCP gate ->
+# read-only postgis checks -> pgmq create + round-trip.
+#
+# The pgmq control file pins schema=pgmq (not on the default search_path), so
+# every call is schema-qualified. Signatures verified against pgmq.sql at the
+# v1.10.0 tag: pgmq.create(text) returns void;
+# pgmq.send(text, jsonb) returns SETOF bigint;
+# pgmq.read(text, vt int, qty int [, conditional jsonb]) returns
+# SETOF pgmq.message_record (whose `message jsonb` column carries the payload).
+if ! psql "CREATE EXTENSION pgmq;" >/dev/null 2>&1; then
+	echo "[smoke-${arch}] FAIL: CREATE EXTENSION pgmq failed" >&2
+	exit 1
+fi
+echo "[smoke-${arch}] pgmq extension created: ok"
+
+if ! psql "SELECT pgmq.create('smoke_queue');" >/dev/null 2>&1; then
+	echo "[smoke-${arch}] FAIL: pgmq.create('smoke_queue') failed" >&2
+	exit 1
+fi
+echo "[smoke-${arch}] pgmq queue created: smoke_queue"
+
+sent_id=$(psql "SELECT pgmq.send('smoke_queue', '{\"ping\": \"pong\"}'::jsonb);")
+if [[ -z "${sent_id}" ]]; then
+	echo "[smoke-${arch}] FAIL: pgmq.send returned no msg_id" >&2
+	exit 1
+fi
+
+payload=$(psql "SELECT message->>'ping' FROM pgmq.read('smoke_queue', 30, 1);")
+if [[ "$payload" != "pong" ]]; then
+	echo "[smoke-${arch}] FAIL: pgmq.read payload='${payload:-<empty>}' (expected 'pong')" >&2
+	exit 1
+fi
+echo "[smoke-${arch}] pgmq round-trip: send msg_id=${sent_id}, read payload='pong'"
 
 echo "[smoke-${arch}] PASS"

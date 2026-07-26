@@ -44,7 +44,7 @@ OCI_TOOLS    := markdownlint-cli2
 # Convoy-owned validation inputs (upstream-owned files are excluded; see CONVOY-FORK.md).
 SHELL_SCRIPTS  := $(wildcard scripts/*.sh)
 WORKFLOWS      := $(wildcard .github/workflows/*.yml)
-CONVOY_DOCKERFILES := $(wildcard dockerfiles/*.dockerfile)  # none in WU1
+CONVOY_DOCKERFILES := $(wildcard dockerfiles/*.dockerfile)  # Convoy-authored product Dockerfiles
 MARKDOWN_FILES := CONVOY-FORK.md
 
 # Resolve a tool: pinned cache first, then PATH (tools-resolve.sh warns on fallback).
@@ -151,13 +151,20 @@ smoke: ## Build the unmodified upstream 18-3.6 image natively (baseline; build-o
 # buildable — the heart of WU2. scripts/smoke-run.sh is the executable AC proof.
 # Buildx is a TOOLSPEC host prerequisite; no new toolchain. Publish/sign/registry
 # stays WU4; build-multiarch only assembles a local manifest, it never publishes.
-SMOKE_CONTEXT := $(SMOKE_VERSION)
+# WU3: the runnable targets now build the CONVOY PRODUCT Dockerfile
+# (dockerfiles/18-3.6.dockerfile, which layers pgmq on the upstream PostGIS
+# layer) from the repo-root context, and scripts/smoke-run.sh adds a pgmq
+# create + queue round-trip assertion. The build-only `smoke` baseline above
+# STAYS on the UNMODIFIED upstream image (context $(SMOKE_VERSION), default
+# Dockerfile) so it keeps proving the upstream baseline builds — the WU1 intent.
+SMOKE_DOCKERFILE := dockerfiles/18-3.6.dockerfile
+SMOKE_CTX_ROOT   := .
 
-smoke-arm64: ## Runnable smoke: build + run 18-3.6 on linux/arm64
-	@scripts/smoke-run.sh arm64 $(SMOKE_CONTEXT)
+smoke-arm64: ## Runnable smoke: build + run the product image on linux/arm64
+	@scripts/smoke-run.sh arm64 $(SMOKE_CTX_ROOT) $(SMOKE_DOCKERFILE)
 
-smoke-amd64: ## Runnable smoke: build + run 18-3.6 on linux/amd64 (emulated on Apple Silicon)
-	@scripts/smoke-run.sh amd64 $(SMOKE_CONTEXT)
+smoke-amd64: ## Runnable smoke: build + run the product image on linux/amd64 (emulated on Apple Silicon)
+	@scripts/smoke-run.sh amd64 $(SMOKE_CTX_ROOT) $(SMOKE_DOCKERFILE)
 
 smoke-multiarch: smoke-arm64 smoke-amd64 ## Runnable smoke on BOTH arches (amd64 emulated on Apple Silicon)
 
@@ -168,7 +175,7 @@ smoke-native: ## Runnable smoke for the daemon-native arch (fast; used by presub
 	@arch=$$(docker info --format '{{.Architecture}}' \
 		| sed -e 's/aarch64/arm64/' -e 's/x86_64/amd64/'); \
 	echo "smoke-native: daemon arch=$$arch"; \
-	scripts/smoke-run.sh "$$arch" $(SMOKE_CONTEXT)
+	scripts/smoke-run.sh "$$arch" $(SMOKE_CTX_ROOT) $(SMOKE_DOCKERFILE)
 
 # Assemble a local multi-arch manifest (linux/amd64,linux/arm64) to an OCI
 # layout tarball WITHOUT publishing. Proves both arches build into one manifest.
@@ -178,7 +185,8 @@ build-multiarch: ## Assemble a local multi-arch manifest (amd64+arm64) without p
 	@mkdir -p $(dir $(MULTIARCH_TARBALL))
 	@echo "build-multiarch: assembling linux/amd64,linux/arm64 manifest -> $(MULTIARCH_TARBALL)"
 	@$(DOCKER) buildx build --platform linux/amd64,linux/arm64 \
-		--output type=oci,dest=$(MULTIARCH_TARBALL) $(SMOKE_VERSION)
+		-f $(SMOKE_DOCKERFILE) \
+		--output type=oci,dest=$(MULTIARCH_TARBALL) $(SMOKE_CTX_ROOT)
 	@echo "build-multiarch: manifest assembled at $(MULTIARCH_TARBALL)"
 	@# Positive assertion: the assembled OCI tarball's manifest-list blob must
 	@# carry BOTH linux/amd64 and linux/arm64. imagetools inspect is registry-only
@@ -203,7 +211,7 @@ vendor-audit: ## Report upstream commits not yet on convoy-vendor
 
 # Local equivalent of the fast PR tier. validate already includes format (shfmt),
 # the lint-* suite, and generated-check; smoke-native builds AND RUNS the
-# upstream 18-3.6 image on the daemon-native arch (fast; no emulation), proving
-# the baseline is runnable, not merely buildable.
+# Convoy product image (18-3.6 + pgmq) on the daemon-native arch (fast; no
+# emulation), proving the product image is runnable, not merely buildable.
 presubmit: validate smoke-native ## validate (shfmt + lints + generated-check) + native runnable smoke
 	@echo "presubmit: all Convoy gates green."

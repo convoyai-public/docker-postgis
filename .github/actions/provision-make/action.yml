@@ -1,10 +1,11 @@
 # Composite action: build & install official GNU Make 4.4.1 with sha256 verification.
 #
 # Ubuntu 24.04 runners ship GNU Make 4.3; TOOLSPEC requires 4.4+. This builds
-# the official 4.4.1 release (dependency-free bootstrap via build.sh) and
-# verifies the download against a pinned sha256 before building — matching the
-# sha256 posture of tools/tools.yaml, so a tampered or replaced tarball fails
-# CI instead of silently building.
+# the official 4.4.1 release via the standard autotools build (./configure &&
+# make) — the release tarball ships configure, and the runner's system make
+# bootstraps the build — and verifies the download against a pinned sha256
+# before building, matching the sha256 posture of tools/tools.yaml, so a
+# tampered or replaced tarball fails CI instead of silently building.
 #
 # Shared by .github/workflows/ci.yml and .github/workflows/vendor-audit.yml so
 # both workflows provision Make the same way and cannot drift.
@@ -41,6 +42,7 @@ runs:
         echo "${MAKE_SHA256}  make.tgz" | sha256sum -c -
         tar -xzf make.tgz
         cd "make-${MAKE_VERSION}"
-        ./build.sh
+        ./configure --quiet
+        make
         sudo install -m 0755 make /usr/local/bin/make
         make --version | head -1

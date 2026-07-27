@@ -1,0 +1,220 @@
+# Pinned repository-managed tools — convoy-postgres (Convoy fork of postgis/docker-postgis).
+#
+# This is the single source of truth for the versions of the static-validation,
+# supply-chain, and release tools used by this repository. `scripts/tools-sync.sh`
+# reads this file, downloads the artifact for the current host OS/arch,
+# verifies the SHA-256 checksum, and exposes the executable from a gitignored
+# repo-local cache (`.tools/cache/<host>/<tool>`). CI and developers resolve to
+# the same versions.
+#
+# Policy reference: convoy-deploy specs/TOOLSPEC.md (`convoy-postgres Tooling`,
+# `Tool Pinning & Bootstrap`). Update a pin by editing this file and re-running
+# `make tools`; never edit the cache directly.
+#
+# Supported hosts: darwin/arm64, linux/amd64, linux/arm64.
+# markdownlint-cli2 is pinned by OCI image digest (no host Node runtime).
+# govulncheck is omitted (N/A) — this repository has no Go code in WU1.
+#
+# Checksums recorded 2026-07-25 from each project's official release artifacts.
+
+manifest-version: 1
+
+tools:
+  actionlint:
+    version: "1.7.12"
+    license: MIT
+    source: "https://github.com/rhysd/actionlint"
+    artifacts:
+      "darwin/arm64":
+        url: "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_arm64.tar.gz"
+        sha256: "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f"
+        archive: tar.gz
+        path: "actionlint"
+      "linux/amd64":
+        url: "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz"
+        sha256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        archive: tar.gz
+        path: "actionlint"
+      "linux/arm64":
+        url: "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_arm64.tar.gz"
+        sha256: "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6"
+        archive: tar.gz
+        path: "actionlint"
+
+  hadolint:
+    version: "2.14.0"
+    license: GPL-3.0
+    source: "https://github.com/hadolint/hadolint"
+    artifacts:
+      "darwin/arm64":
+        url: "https://github.com/hadolint/hadolint/releases/download/v2.14.0/hadolint-macos-arm64"
+        sha256: "3625e2e9f43dcfe7bd38738a5f5520ed50ce39ed28485266e6803dd7bc197b10"
+        archive: bin
+        path: "hadolint"
+      "linux/amd64":
+        url: "https://github.com/hadolint/hadolint/releases/download/v2.14.0/hadolint-linux-x86_64"
+        sha256: "6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47"
+        archive: bin
+        path: "hadolint"
+      "linux/arm64":
+        url: "https://github.com/hadolint/hadolint/releases/download/v2.14.0/hadolint-linux-arm64"
+        sha256: "331f1d3511b84a4f1e3d18d52fec284723e4019552f4f47b19322a53ce9a40ed"
+        archive: bin
+        path: "hadolint"
+
+  shellcheck:
+    version: "0.11.0"
+    license: GPL-3.0
+    source: "https://github.com/koalaman/shellcheck"
+    artifacts:
+      "darwin/arm64":
+        url: "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.aarch64.tar.gz"
+        sha256: "339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f"
+        archive: tar.gz
+        path: "shellcheck-v0.11.0/shellcheck"
+      "linux/amd64":
+        url: "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz"
+        sha256: "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6"
+        archive: tar.gz
+        path: "shellcheck-v0.11.0/shellcheck"
+      "linux/arm64":
+        url: "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.gz"
+        sha256: "68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc"
+        archive: tar.gz
+        path: "shellcheck-v0.11.0/shellcheck"
+
+  shfmt:
+    version: "3.13.1"
+    license: BSD-3-Clause
+    source: "https://github.com/mvdan/sh"  # shfmt is released from the mvdan/sh repo.
+    artifacts:
+      "darwin/arm64":
+        url: "https://github.com/mvdan/sh/releases/download/v3.13.1/shfmt_v3.13.1_darwin_arm64"
+        sha256: "9680526be4a66ea1ffe988ed08af58e1400fe1e4f4aef5bd88b20bb9b3da33f8"
+        archive: bin
+        path: "shfmt"
+      "linux/amd64":
+        url: "https://github.com/mvdan/sh/releases/download/v3.13.1/shfmt_v3.13.1_linux_amd64"
+        sha256: "fb096c5d1ac6beabbdbaa2874d025badb03ee07929f0c9ff67563ce8c75398b1"
+        archive: bin
+        path: "shfmt"
+      "linux/arm64":
+        url: "https://github.com/mvdan/sh/releases/download/v3.13.1/shfmt_v3.13.1_linux_arm64"
+        sha256: "32d92acaa5cd8abb29fc49dac123dc412442d5713967819d8af2c29f1b3857c7"
+        archive: bin
+        path: "shfmt"
+
+  gitleaks:
+    version: "8.30.1"
+    license: MIT
+    source: "https://github.com/gitleaks/gitleaks"
+    note: "gitleaks names its amd64 artifact linux_x64 (not linux_amd64)."
+    artifacts:
+      "darwin/arm64":
+        url: "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz"
+        sha256: "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
+        archive: tar.gz
+        path: "gitleaks"
+      "linux/amd64":
+        url: "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz"
+        sha256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        archive: tar.gz
+        path: "gitleaks"
+      "linux/arm64":
+        url: "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz"
+        sha256: "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080"
+        archive: tar.gz
+        path: "gitleaks"
+
+  zizmor:
+    version: "1.28.0"
+    license: MIT
+    source: "https://github.com/woodruffw/zizmor"
+    artifacts:
+      "darwin/arm64":
+        url: "https://github.com/woodruffw/zizmor/releases/download/v1.28.0/zizmor-aarch64-apple-darwin.tar.gz"
+        sha256: "54949bbd6b4c8527046bb8990bac9e0dab3eec787640f4e6199ae121dd1040be"
+        archive: tar.gz
+        path: "zizmor"
+      "linux/amd64":
+        url: "https://github.com/woodruffw/zizmor/releases/download/v1.28.0/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+        sha256: "e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09"
+        archive: tar.gz
+        path: "zizmor"
+      "linux/arm64":
+        url: "https://github.com/woodruffw/zizmor/releases/download/v1.28.0/zizmor-aarch64-unknown-linux-gnu.tar.gz"
+        sha256: "324e43770cfacf4216f8aefb287263b5b5c733c85b03bf7583b5cc4a0460239e"
+        archive: tar.gz
+        path: "zizmor"
+
+  syft:
+    version: "1.49.0"
+    license: Apache-2.0
+    source: "https://github.com/anchore/syft"
+    artifacts:
+      "darwin/arm64":
+        url: "https://github.com/anchore/syft/releases/download/v1.49.0/syft_1.49.0_darwin_arm64.tar.gz"
+        sha256: "4d137302fb3e049cb1b124b1cbd840a77280dc9f50a45a5a4389250a2228b3cb"
+        archive: tar.gz
+        path: "syft"
+      "linux/amd64":
+        url: "https://github.com/anchore/syft/releases/download/v1.49.0/syft_1.49.0_linux_amd64.tar.gz"
+        sha256: "7aa2f03ee92739cf643279ba3990548b9925d4e22cae13f46831ee62821147fe"
+        archive: tar.gz
+        path: "syft"
+      "linux/arm64":
+        url: "https://github.com/anchore/syft/releases/download/v1.49.0/syft_1.49.0_linux_arm64.tar.gz"
+        sha256: "c7c32de183c32368de197edba75e8dba7632915f7761bacd55149a9ca7fe0fa4"
+        archive: tar.gz
+        path: "syft"
+
+  grype:
+    version: "0.116.0"
+    license: Apache-2.0
+    source: "https://github.com/anchore/grype"
+    artifacts:
+      "darwin/arm64":
+        url: "https://github.com/anchore/grype/releases/download/v0.116.0/grype_0.116.0_darwin_arm64.tar.gz"
+        sha256: "9425c225d0d63d2b384baf2177d3aba713a2bfb800235848ce70169e78c9c5fa"
+        archive: tar.gz
+        path: "grype"
+      "linux/amd64":
+        url: "https://github.com/anchore/grype/releases/download/v0.116.0/grype_0.116.0_linux_amd64.tar.gz"
+        sha256: "40aff724297312f91ea390d003bed8d8651c74cc7f5b26732db80b3a408d2fc5"
+        archive: tar.gz
+        path: "grype"
+      "linux/arm64":
+        url: "https://github.com/anchore/grype/releases/download/v0.116.0/grype_0.116.0_linux_arm64.tar.gz"
+        sha256: "7af3eed24f469b0cf3ab5ec4508d9c12f4bb9c2c6be714f32973c7b5d63cb6a5"
+        archive: tar.gz
+        path: "grype"
+
+  cosign:
+    version: "3.1.2"
+    license: Apache-2.0
+    source: "https://github.com/sigstore/cosign"
+    note: "WU4 uses cosign for release signing; pinned now for cache parity."
+    artifacts:
+      "darwin/arm64":
+        url: "https://github.com/sigstore/cosign/releases/download/v3.1.2/cosign-darwin-arm64"
+        sha256: "dec1c3f802320b19c2fbcf2dc7bcfb3f258e1c181a046c23a1a074bdf932f10a"
+        archive: bin
+        path: "cosign"
+      "linux/amd64":
+        url: "https://github.com/sigstore/cosign/releases/download/v3.1.2/cosign-linux-amd64"
+        sha256: "f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf"
+        archive: bin
+        path: "cosign"
+      "linux/arm64":
+        url: "https://github.com/sigstore/cosign/releases/download/v3.1.2/cosign-linux-arm64"
+        sha256: "90e7ae0b5dfd60f20816b52c012addf7fc055ebcc7bea4ce81c428ca8518c302"
+        archive: bin
+        path: "cosign"
+
+  markdownlint-cli2:
+    version: "0.23.1"
+    license: MIT
+    source: "https://github.com/DavidAnson/markdownlint-cli2"
+    kind: oci
+    image: "docker.io/davidanson/markdownlint-cli2@sha256:f382ea4fdc949883e79de678009437fb40c339323654c7b0dd4d5221cda8ed20"
+    note: "Pinned by OCI image digest. Run via `docker run`; no host Node runtime."

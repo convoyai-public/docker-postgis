@@ -1,0 +1,48 @@
+# Composite action: build & install official GNU Make 4.4.1 with sha256 verification.
+#
+# Ubuntu 24.04 runners ship GNU Make 4.3; TOOLSPEC requires 4.4+. This builds
+# the official 4.4.1 release via the standard autotools build (./configure &&
+# make) — the release tarball ships configure, and the runner's system make
+# bootstraps the build — and verifies the download against a pinned sha256
+# before building, matching the sha256 posture of tools/tools.yaml, so a
+# tampered or replaced tarball fails CI instead of silently building.
+#
+# Shared by .github/workflows/ci.yml and .github/workflows/vendor-audit.yml so
+# both workflows provision Make the same way and cannot drift.
+#
+# The sha256 was computed from the byte-identical artifacts on ftp.gnu.org and
+# ftpmirror.gnu.org (verified identical via cmp). To bump: edit MAKE_VERSION and
+# MAKE_SHA256 together, re-deriving the sha256 from the official GNU release.
+name: Provision GNU Make 4.4+
+description: Build and install official GNU Make 4.4.1 from its sha256-verified source release.
+
+inputs:
+  make-version:
+    description: GNU Make version to build (must match MAKE_SHA256).
+    required: false
+    default: '4.4.1'
+  make-sha256:
+    description: Pinned sha256 of the make-<version>.tar.gz release artifact.
+    required: false
+    default: 'dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3'
+
+runs:
+  using: composite
+  steps:
+    - name: Build and install GNU Make (sha256-verified)
+      shell: bash
+      env:
+        MAKE_VERSION: ${{ inputs.make-version }}
+        MAKE_SHA256: ${{ inputs.make-sha256 }}
+      run: |
+        set -euo pipefail
+        cd /tmp
+        curl -fsSL "https://ftp.gnu.org/gnu/make/make-${MAKE_VERSION}.tar.gz" -o make.tgz
+        # Fail hard if the download does not match the pinned checksum.
+        echo "${MAKE_SHA256}  make.tgz" | sha256sum -c -
+        tar -xzf make.tgz
+        cd "make-${MAKE_VERSION}"
+        ./configure --quiet
+        make
+        sudo install -m 0755 make /usr/local/bin/make
+        make --version | head -1

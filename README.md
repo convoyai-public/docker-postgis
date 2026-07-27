@@ -1,3 +1,13 @@
+<!-- CONVOY-FORK-TOP -->
+> **Convoy fork.** This is `convoyai-public/docker-postgis`, a Convoy fork of
+> upstream [`postgis/docker-postgis`](https://github.com/postgis/docker-postgis).
+> It publishes the **`convoy-postgres`** image. Upstream history is preserved;
+> the upstream README body below is unchanged. See
+> [`CONVOY-FORK.md`](./CONVOY-FORK.md) for the fork/branch model, the
+> merge-forward procedure, and the local tool entry point (`gmake` on macOS,
+> `make` on Linux).
+<!-- /CONVOY-FORK-TOP -->
+
 # postgis/postgis
 
 [![Build Status](https://github.com/postgis/docker-postgis/workflows/Docker%20PostGIS%20CI/badge.svg)](https://github.com/postgis/docker-postgis/actions) [![Join the chat at https://gitter.im/postgis/docker-postgis](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/postgis/docker-postgis?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)

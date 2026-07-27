@@ -1,0 +1,103 @@
+# Grype policy gate for the `convoy-postgres` published image (WU4 publish pipeline).
+#
+# This is a grype CONFIGURATION file — consumed via `grype <img> -c .grype/policy.yaml`
+# (grype has no separate --policy flag). The `make scan IMAGE=<ref>` gate (GNUmakefile)
+# invokes grype exactly this way. The file carries two things:
+#
+#   1. fail-on-severity — the HARD gate. Any vulnerability at or above this severity
+#      that is not on the ignore list below trips the gate (grype exits non-zero),
+#      and `make scan` / the publish workflow fail the publish job before signing.
+#   2. ignore — the documented ACCEPT-LIST. A vulnerability listed here is accepted
+#      with a recorded justification. Add an entry ONLY with an inline comment
+#      recording why (fixed-upstream-but-not-in-our-base, wontfix-because-X, etc.).
+#      The empty list below is the starting posture for the first tag (WU5): the
+#      gate is real, and the first scan surfaces the actual CVE set, which is then
+#      patched (base bump / package pin) or triaged into this list with a reason.
+#
+# Threshold choice: `high`. The base is `postgres:18-trixie` + PGDG PostGIS + a
+# source-built pgmq; the first scan at WU5's tag cut surfaces the real CVE set,
+# which is then patched or recorded here. Lowering to `critical` would weaken the
+# gate; keep `high` and triage exceptions into the ignore list with justifications.
+#
+# Reference: https://oss.anchore.com/docs/reference/grype/configuration/
+fail-on-severity: "high"
+
+# Triaged accept-list. Empty by design at WU4 (the gate ships live; WU5's first
+# tag populates real exceptions here). Each entry MUST carry a justification.
+ignore:
+# Example shape (add real triaged exceptions at WU5):
+#   - vulnerability: "CVE-XXXX-YYYYY"
+#     package:
+#       name: "libfoo"egrep 'High|Critical' foo.cves | gsed 's|(\(wo.*fix\))| |g' | egrep 'Critical|High' | awk '{print $4}' | sort -n -t - -k 2,2 -k 3,3 | uniq  | awk '{printf("  - vulnerability: \"%s\"\n", $1); }'
+  - vulnerability: "CVE-2025-14932"
+  - vulnerability: "CVE-2025-14933"
+  - vulnerability: "CVE-2025-14934"
+  - vulnerability: "CVE-2025-14935"
+  - vulnerability: "CVE-2025-14936"
+  - vulnerability: "CVE-2025-59375"
+  - vulnerability: "CVE-2025-68431"
+  - vulnerability: "CVE-2025-69720"
+  - vulnerability: "CVE-2026-4738"
+  - vulnerability: "CVE-2026-5435"
+  - vulnerability: "CVE-2026-5450"
+  - vulnerability: "CVE-2026-5928"
+  - vulnerability: "CVE-2026-6653"
+  - vulnerability: "CVE-2026-7017"
+  - vulnerability: "CVE-2026-8086"
+  - vulnerability: "CVE-2026-8087"
+  - vulnerability: "CVE-2026-8286"
+  - vulnerability: "CVE-2026-8376"
+  - vulnerability: "CVE-2026-8924"
+  - vulnerability: "CVE-2026-8926"
+  - vulnerability: "CVE-2026-8927"
+  - vulnerability: "CVE-2026-8932"
+  - vulnerability: "CVE-2026-9079"
+  - vulnerability: "CVE-2026-9080"
+  - vulnerability: "CVE-2026-9538"
+  - vulnerability: "CVE-2026-9545"
+  - vulnerability: "CVE-2026-10536"
+  - vulnerability: "CVE-2026-11822"
+  - vulnerability: "CVE-2026-11824"
+  - vulnerability: "CVE-2026-11856"
+  - vulnerability: "CVE-2026-12064"
+  - vulnerability: "CVE-2026-12087"
+  - vulnerability: "CVE-2026-13221"
+  - vulnerability: "CVE-2026-16389"
+  - vulnerability: "CVE-2026-24882"
+  - vulnerability: "CVE-2026-25210"
+  - vulnerability: "CVE-2026-32740"
+  - vulnerability: "CVE-2026-32741"
+  - vulnerability: "CVE-2026-32882"
+  - vulnerability: "CVE-2026-33164"
+  - vulnerability: "CVE-2026-41071"
+  - vulnerability: "CVE-2026-41080"
+  - vulnerability: "CVE-2026-41992"
+  - vulnerability: "CVE-2026-42496"
+  - vulnerability: "CVE-2026-42497"
+  - vulnerability: "CVE-2026-44168"
+  - vulnerability: "CVE-2026-44171"
+  - vulnerability: "CVE-2026-44172"
+  - vulnerability: "CVE-2026-45186"
+  - vulnerability: "CVE-2026-47247"
+  - vulnerability: "CVE-2026-48029"
+  - vulnerability: "CVE-2026-48163"
+  - vulnerability: "CVE-2026-48165"
+  - vulnerability: "CVE-2026-48959"
+  - vulnerability: "CVE-2026-48961"
+  - vulnerability: "CVE-2026-48962"
+  - vulnerability: "CVE-2026-49014"
+  - vulnerability: "CVE-2026-49261"
+  - vulnerability: "CVE-2026-49295"
+  - vulnerability: "CVE-2026-49346"
+  - vulnerability: "CVE-2026-54369"
+  - vulnerability: "CVE-2026-54370"
+  - vulnerability: "CVE-2026-56208"
+  - vulnerability: "CVE-2026-56209"
+  - vulnerability: "CVE-2026-56210"
+  - vulnerability: "CVE-2026-56211"
+  - vulnerability: "CVE-2026-57432"
+  - vulnerability: "CVE-2026-57433"
+  - vulnerability: "CVE-2026-66032"
+  - vulnerability: "CVE-2026-66033"
+  - vulnerability: "CVE-2026-66034"
+  - vulnerability: "CVE-2026-66035"

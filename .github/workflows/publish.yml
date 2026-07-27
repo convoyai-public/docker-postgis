@@ -114,21 +114,21 @@ jobs:
           username: _json_key
           password: ${{ secrets.GHA_GAR_CONTAINER_PUBLISH_KEY }}
 
-      - name: Dump Repository Variables Context
-        run: echo "${{ toJSON(vars) }}"
+#      - name: Dump Repository Variables Context
+#        run: echo "${{ toJSON(vars) }}"
 
-      - name: Dump Misc Values
-        run: |
-          echo "env.IMAGE_NAME: ${{ env.IMAGE_NAME }}"
-          echo "vars.GHA_GAR_HOST: ${{ vars.GHA_GAR_HOST }}"
-          echo "vars.GHA_GAR_PATH: ${{ vars.GHA_GAR_PATH }}"
-          echo "vars.DH_REPO_MARK: ${{ vars.DH_REPO_MARK }}"
-          echo "env.IMAGE_NAME: ${{ env.IMAGE_NAME }}"
-          echo "github.repository_owner: ${{ github.repository_owner }}"
-          echo "github.ref_name: ${{ github.ref_name }}"
+#      - name: Dump Misc Values
+#        run: |
+#          echo "env.IMAGE_NAME: ${{ env.IMAGE_NAME }}"
+#          echo "vars.GHA_GAR_HOST: ${{ vars.GHA_GAR_HOST }}"
+#          echo "vars.GHA_GAR_PATH: ${{ vars.GHA_GAR_PATH }}"
+#          echo "vars.DH_REPO_MARK: ${{ vars.DH_REPO_MARK }}"
+#          echo "env.IMAGE_NAME: ${{ env.IMAGE_NAME }}"
+#          echo "github.repository_owner: ${{ github.repository_owner }}"
+#          echo "github.ref_name: ${{ github.ref_name }}"
 
-      - name: Dump Environment Context
-        run: echo "${{ toJSON(env) }}"
+#      - name: Dump Environment Context
+#        run: echo "${{ toJSON(env) }}"
 
         
       # --- Multi-arch build + triple-registry push ----------------------------
@@ -145,14 +145,13 @@ jobs:
           # image. Crucially NO type=raw,value=latest, NO type=edge — latest is
           # never emitted. The no-latest assertion below enforces it at run time.
           tags: |
-            # type=raw,value=${{ steps.pkg-meta.outputs.version }}
             type=raw,value=${{ github.ref_name }}
             # type=raw,value=latest
             # type=ref,event=tag
 
       - name: Set up QEMU
-        # docker/setup-qemu-action v3
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+        # docker/setup-qemu-action v4.2.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8
 
 #      - name: Set up Docker Buildx
 #        # docker/setup-buildx-action v3
@@ -160,11 +159,13 @@ jobs:
 
       - name: Setup Blacksmith Builder
         id: docker-setup
-        uses: useblacksmith/setup-docker-builder@v1
+        # useblacksmith/setup-docker-builder v2.0.0 v2
+        uses: useblacksmith/setup-docker-builder@33803e640bd9d674f2843a8c323aa2a7da478d23
 
       - name: Build and push (multi-arch, triple registry)
         id: build
-        uses: useblacksmith/build-push-action@v2
+        # useblacksmith/build-push-action v2.2.0 v2
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8
         with:
           context: .
           file: ${{ env.DOCKERFILE }}

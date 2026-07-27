@@ -25,6 +25,16 @@ fail-on-severity: "high"
 # Triaged accept-list. Empty by design at WU4 (the gate ships live; WU5's first
 # tag populates real exceptions here). Each entry MUST carry a justification.
 ignore: []
+#  - vulnerability: "CVE-2026-5450"
+#  - vulnerability: "CVE-2026-8924"
+#  - vulnerability: "CVE-2026-9079"
+#  - vulnerability: "CVE-2026-10536"
+#  - vulnerability: "CVE-2026-11856"
+#  - vulnerability: "CVE-2026-44172"
+#  - vulnerability: "CVE-2026-48165"
+#  - vulnerability: "CVE-2026-49261"
+#  - vulnerability: "CVE-2026-49261"
+  
 # Example shape (add real triaged exceptions at WU5):
 #   - vulnerability: "CVE-XXXX-YYYYY"
 #     package:

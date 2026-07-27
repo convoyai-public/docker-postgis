@@ -8,11 +8,13 @@ generated Dockerfiles, the `update.sh` generator, and the per-version image
 recipes; this fork layers Convoy's packaging, validation, and release concerns
 on top without reimplementing upstream's work.
 
-The **published image name is `convoy-postgres`**. The publishing org (GHCR
-primary + Docker Hub mirror), dual-registry parity, SBOM/provenance, and cosign
-signing are established in WU4 of the convoy-deploy Phase 1 plan and are
-**out of scope** for this work unit (WU1). WU1 only stands up the repo substrate,
-the local validation/tooling scaffold, and thin CI.
+The **published image name is `convoy-postgres`**. The publishing topology,
+multi-registry parity, SBOM/provenance, and cosign signing are established in
+WU4 of the convoy-deploy Phase 1 plan and are **out of scope** for this work
+unit (WU1). WU1 only stands up the repo substrate, the local validation/tooling
+scaffold, and thin CI. (WU4 landed GAR-primary triple publish + keyless cosign;
+see the [WU4 design record](#wu4-pr-validation--signed-multi-registry-multi-arch-publish-pipeline)
+for the authoritative topology.)
 
 The authoritative tooling policy is
 [`convoy-deploy`'s `specs/TOOLSPEC.md`](https://github.com/convoyai/convoy-deploy/blob/main/specs/TOOLSPEC.md),

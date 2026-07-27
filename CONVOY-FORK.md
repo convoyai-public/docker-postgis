@@ -379,3 +379,211 @@ only ships the pipeline that fires it.
   (nothing regressed); the four publish-gate targets are syntactically valid GNU
   Make and resolve their pinned tools (`make tools-audit` shows them cached).
   End-to-end publish verification is deferred to WU5's tag cut.
+
+## Release procedure (compound-tag release)
+
+This is the operator runbook for cutting a `convoy-postgres` compound-tag
+release. Releases are an **explicit operator decision** (TOOLSPEC): no automation
+cuts or publishes a tag. The pipeline this procedure drives — multi-arch build,
+triple-registry push, and the four publish gates — is designed and documented in
+the [WU4 section](#wu4-pr-validation--signed-multi-registry-multi-arch-publish-pipeline);
+this section tells the operator how to drive it and does not re-explain the
+pipeline design. The first release cut by this procedure is the **Phase 1
+pivot** (WU5/ENG-521): the compound tag the WU6/WU7/WU8 consumers pin to.
+
+### Tag scheme
+
+The compound tag is `<PG-major>-<postgis>-<pgmq>`, mirroring the upstream
+`postgis/docker-postgis` version-directory scheme with the pgmq suffix
+recorded in the [WU3 section](#wu3-pgmq-bundling-into-the-image). The first cut:
+
+```bash
+18-3.6-pgmq1.10
+```
+
+(PG 18, PostGIS 3.6, pgmq 1.10.) The workflow trigger glob
+`on.push.tags: ['18-*-*']` (`publish.yml`) requires **two dashes** after `18-`,
+so it matches `18-3.6-pgmq1.10` but not a plain upstream-style `18-3.6` tag — a
+mistagged `18-3.6` will not fire the pipeline.
+
+**No floating `latest` is ever published.** `docker/metadata-action` is
+configured with `type=ref,event=tag` only (no `type=raw,value=latest`, no
+`type=edge`), and a run-time assertion in `publish.yml` fails the job if any
+`latest` tag is emitted. Consumers always pin an exact compound tag.
+
+### Pre-flight (recommended)
+
+Before tagging, surface the Grype CVE set locally so the first publish's scan is
+clean. The publish gate (`.grype/policy.yaml`) ships with
+`fail-on-severity: high` and `ignore: []` — the gate is real and the accept-list
+is empty by design; WU5's first scan surfaces the actual CVE set.
+
+```bash
+make smoke-native   # builds AND RUNS the product image on the daemon-native arch
+# smoke-native tags the local image convoy-postgres:18-3.6-smoke-<arch>
+make scan IMAGE=convoy-postgres:18-3.6-smoke-<arch>   # grype -c .grype/policy.yaml
+```
+
+`<arch>` is the daemon's native arch (`arm64` on Apple Silicon, `amd64` on x86
+Linux). Any vulnerability at or above `high` not on the `ignore` list trips the
+gate. For each gating finding, either **patch** it (base bump or package pin) or
+**triage** it into `.grype/policy.yaml`'s `ignore:` with a dated inline
+justification (the file documents this exact entry shape) — **before** the tag
+is cut.
+
+### Cut the tag
+
+The tag is cut on `main` (never a feature branch; see [Branch model](#branch-model)).
+From an up-to-date `main`:
+
+```bash
+git checkout main && git pull --ff-only
+git tag -a 18-3.6-pgmq1.10 -m "convoy-postgres 18-3.6-pgmq1.10 (PG18 + PostGIS 3.6 + pgmq 1.10)"
+git push origin 18-3.6-pgmq1.10
+```
+
+The `git push origin <tag>` is what fires the publish pipeline.
+
+### What fires
+
+The tag push triggers `.github/workflows/publish.yml`, guarded to
+`github.repository == 'convoyai-public/docker-postgis'` (a tag on any other fork
+has no org secrets and must never publish). The pipeline, in order:
+
+1. **Multi-arch build** of `dockerfiles/18-3.6.dockerfile` (the WU3 product
+   image) for `linux/amd64,linux/arm64` via QEMU + buildx, `push: true`.
+2. **Triple-registry push** of the compound tag (see Published references).
+3. **No-`latest` assertion** — fails the job before any gate runs if
+   metadata-action emitted a `latest`.
+4. **Four sequential publish gates**, each failing the job on its regression:
+   Grype policy scan → Syft CycloneDX SBOM → keyless cosign sign + SBOM attest
+   (once per registry, three times) → cross-registry manifest parity.
+
+The design rationale for each gate is in the
+[WU4 section](#wu4-pr-validation--signed-multi-registry-multi-arch-publish-pipeline).
+`workflow_dispatch` is an alternate trigger (manual run from the Actions UI),
+useful for re-running the gates against an already-pushed tag without re-pushing
+it.
+
+### Published references
+
+The published **image name is `convoy-postgres`** across all three registries;
+the three registries are distinct prefixes over that same image name. Concrete
+pull refs for `18-3.6-pgmq1.10`:
+
+| Registry | Pull reference |
+| --- | --- |
+| GAR (primary) | `us-central1-docker.pkg.dev/containerhosting/convoy/convoy-postgres:18-3.6-pgmq1.10` |
+| Docker Hub | `${DH_REPO_MARK}/convoy-postgres:18-3.6-pgmq1.10` |
+| GHCR | `ghcr.io/convoyai-public/convoy-postgres:18-3.6-pgmq1.10` |
+
+`GHA_GAR_HOST`/`GHA_GAR_PATH` and `DH_REPO_MARK` are provisioned as
+`convoyai-public` org variables; this document names the variables rather than
+fabricating the Docker Hub namespace. Reconciliation: the Linear AC's literal
+`docker pull convoyai/convoy-postgres:...` uses the **logical** image name; the
+concrete Docker Hub pull ref uses the `${DH_REPO_MARK}` namespace, **not**
+`convoyai`.
+
+### Verify acceptance
+
+After a green publish run, verify against each of the three refs above.
+
+**Multi-arch manifest + per-arch digests** — the manifest list and each
+platform's digest (the parity refs; the publish-parity gate already asserted the
+three registries resolve to byte-identical raw manifests):
+
+```bash
+docker buildx imagetools inspect <ref>   # any one of the three refs above
+```
+
+**Pull each arch:**
+
+```bash
+docker pull --platform linux/amd64 <ref>
+docker pull --platform linux/arm64 <ref>
+```
+
+**PostGIS + pgmq present** — matches the WU3 acceptance shape. The authoritative
+runnable test is `scripts/smoke-run.sh` (exercised by `make smoke-multiarch`).
+For an operator spot-check of a pulled image, run a container and confirm the
+extensions; postgis is auto-created by the image's initdb script, so verify its
+presence and create pgmq:
+
+```bash
+docker run -d --name cp-verify -e POSTGRES_PASSWORD=x <ref>
+# Gate on TCP readiness — NOT bare pg_isready. The default resolves to the temp
+# init server's Unix socket and returns a false "ready" before the initdb script
+# has created postgis (the readiness race scripts/smoke-run.sh guards against):
+until docker exec cp-verify pg_isready -h 127.0.0.1 -p 5432 -U postgres >/dev/null 2>&1; do sleep 1; done
+docker exec cp-verify psql -U postgres -c \
+  "SELECT extname FROM pg_extension WHERE extname IN ('postgis','pgmq');"
+docker exec cp-verify psql -U postgres -c "CREATE EXTENSION pgmq;"
+```
+
+**cosign verify (keyless, GitHub OIDC)**, per registry ref. The signing job runs
+with `id-token: write`, so the signature certificate carries the GitHub OIDC
+`job_workflow_ref` for this workflow at this exact tag:
+
+```bash
+cosign verify <ref> \
+  --certificate-identity "https://github.com/convoyai-public/docker-postgis/.github/workflows/publish.yml@refs/tags/18-3.6-pgmq1.10" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+To match every tag from this workflow, swap `--certificate-identity` for
+`--certificate-identity-regexp` and drop the `@refs/tags/<tag>` suffix. The SBOM
+attestation (produced by the `cosign attest` gate) verifies with the same
+identity/issuer:
+
+```bash
+cosign verify-attestation --type cyclonedx <ref> \
+  --certificate-identity "https://github.com/convoyai-public/docker-postgis/.github/workflows/publish.yml@refs/tags/18-3.6-pgmq1.10" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+**No `latest`:** confirm no `latest` tag exists in each registry (the workflow's
+run-time assertion already enforces it at publish time; this is the operator
+double-check).
+
+### Record canonical pin evidence
+
+After a green publish, record the canonical pin reference consumers pin to — as a
+**GitHub Release** attached to the tag and mirrored in a Linear ENG-521 comment.
+This is the single source WU7 (core-platform) and WU8 (data-platform) pin to. It
+captures:
+
+- the compound tag (`18-3.6-pgmq1.10`);
+- the three registry pull refs (see Published references);
+- the multi-arch manifest-list digest (the `sha256:...` from
+  `docker buildx imagetools inspect`, identical across the three registries);
+- the per-arch digests (`linux/amd64`, `linux/arm64`) from the same inspect;
+- the `cosign verify` command (certificate identity + issuer) for the release;
+- the SBOM — attach the `sbom-cyclonedx-18-3.6-pgmq1.10` workflow artifact's
+  JSON to this Release (workflow artifacts expire; the Release is the durable
+  home for the canonical evidence) — and the build provenance attestation.
+
+### Grype triage and re-cut
+
+If the publish scan trips, the publish job fails before signing. Recover:
+
+1. Read the Grype output from the failed publish run (the gate prints the gating
+   vulnerabilities).
+2. For each gating finding, either **patch** it (base bump or package pin) or add
+   a dated, justified entry to `.grype/policy.yaml`'s `ignore:` (the file
+   documents the exact entry shape).
+3. Land that change on `main` via the open WU5 PR; the static gates re-run on
+   the PR.
+4. Re-fire publish cleanly. Because WU5 is the **first** tag and no consumer has
+   pinned it yet, delete and re-create the tag on the new `main` HEAD:
+
+   ```bash
+   git push --delete origin 18-3.6-pgmq1.10
+   git tag -d 18-3.6-pgmq1.10
+   git checkout main && git pull --ff-only
+   git tag -a 18-3.6-pgmq1.10 -m "convoy-postgres 18-3.6-pgmq1.10 (PG18 + PostGIS 3.6 + pgmq 1.10)"
+   git push origin 18-3.6-pgmq1.10
+   ```
+
+This delete-and-recreate is acceptable **only** for the first, pre-consumer tag.
+Later releases must never rewrite a published tag — once WU7/WU8 pin a tag, its
+digest is immutable, and a fix ships as the next compound tag.

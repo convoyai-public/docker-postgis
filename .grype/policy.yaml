@@ -28,11 +28,7 @@ ignore:
 # Example shape (add real triaged exceptions at WU5):
 #   - vulnerability: "CVE-XXXX-YYYYY"
 #     package:
-#       name: "libfoo"
-#     # Triaged 2026-MM-DD: fixed upstream in postgres:18-trixie roll X;
-#     # this image pins Y until the next compound-tag cut (ENG-521).
-# The below from the grype output with:
-# egrep 'High|Critical' foo.cves | gsed 's|(\(wo.*fix\))| |g' | egrep 'Critical|High' | awk '{print $4}' | sort -n -t - -k 2,2 -k 3,3 | uniq  | awk '{printf("  - vulnerability: \"%s\"\n", $1); }'
+#       name: "libfoo"egrep 'High|Critical' foo.cves | gsed 's|(\(wo.*fix\))| |g' | egrep 'Critical|High' | awk '{print $4}' | sort -n -t - -k 2,2 -k 3,3 | uniq  | awk '{printf("  - vulnerability: \"%s\"\n", $1); }'
   - vulnerability: "CVE-2025-14932"
   - vulnerability: "CVE-2025-14933"
   - vulnerability: "CVE-2025-14934"

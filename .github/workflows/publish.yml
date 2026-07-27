@@ -117,8 +117,19 @@ jobs:
       - name: Dump Repository Variables Context
         run: echo "${{ toJSON(vars) }}"
 
+      - name: Dump Misc Values
+        run: |
+          echo "env.IMAGE_NAME: ${{ env.IMAGE_NAME }}"
+          echo "vars.GHA_GAR_HOST: ${{ vars.GHA_GAR_HOST }}"
+          echo "vars.GHA_GAR_PATH: ${{ vars.GHA_GAR_PATH }}"
+          echo "vars.DH_REPO_MARK: ${{ vars.DH_REPO_MARK }}"
+          echo "env.IMAGE_NAME: ${{ env.IMAGE_NAME }}"
+          echo "github.repository_owner: ${{ github.repository_owner }}"
+          echo "github.ref_name: ${{ github.ref_name }}"
+
       - name: Dump Environment Context
         run: echo "${{ toJSON(env) }}"
+
         
       # --- Multi-arch build + triple-registry push ----------------------------
       - name: Extract metadata (compound tag only — NO latest)

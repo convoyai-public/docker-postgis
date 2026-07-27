@@ -114,6 +114,12 @@ jobs:
           username: _json_key
           password: ${{ secrets.GHA_GAR_CONTAINER_PUBLISH_KEY }}
 
+      - name: Dump Repository Variables Context
+        run: echo "${{ toJSON(vars) }}"
+
+      - name: Dump Environment Context
+        run: echo "${{ toJSON(env) }}"
+        
       # --- Multi-arch build + triple-registry push ----------------------------
       - name: Extract metadata (compound tag only — NO latest)
         id: meta

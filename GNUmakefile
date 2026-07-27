@@ -5,21 +5,21 @@
 # -include's the upstream Makefile so upstream's build/test/push targets remain
 # available; it then layers the Convoy targets below. See CONVOY-FORK.md.
 #
-# Policy: convoy-deploy specs/TOOLSPEC.md. Requires GNU Make 4.4+. On macOS use
+# Policy: convoy-deploy specs/TOOLSPEC.md. Requires GNU Make 4.3+. On macOS use
 # Homebrew `gmake` (`brew install make`); the BSD system `/usr/bin/make` is
 # unsupported.
 
-# --- Make version guard (TOOLSPEC: fail fast on < 4.4 / non-GNU) ---------------
+# --- Make version guard (TOOLSPEC: fail fast on < 4.3 / non-GNU) ---------------
 ifeq ($(filter 4.%,$(MAKE_VERSION)),)
-$(error GNU Make 4.4+ required (found MAKE_VERSION='$(MAKE_VERSION)'). \
+$(error GNU Make 4.3+ required (found MAKE_VERSION='$(MAKE_VERSION)'). \
 On macOS install Homebrew make (`brew install make`) and invoke as `gmake`; \
 the BSD system `/usr/bin/make` is unsupported. See CONVOY-FORK.md.)
 endif
-# Compare MAKE_VERSION (e.g. 4.4.1) against 4.4 using version sort.
+# Compare MAKE_VERSION (e.g. 4.3) against 4.3 using version sort.
 _make_min_ok := $(shell \
-	printf '%s\n' '4.4' '$(MAKE_VERSION)' | sort -V | head -1 | grep -q '^4\.4$$' && echo yes)
+	printf '%s\n' '4.3' '$(MAKE_VERSION)' | sort -V | head -1 | grep -q '^4\.3$$' && echo yes)
 ifneq ($(_make_min_ok),yes)
-$(error GNU Make 4.4+ required (found $(MAKE_VERSION)). \
+$(error GNU Make 4.3+ required (found $(MAKE_VERSION)). \
 On macOS use Homebrew `gmake`, not the BSD system `make`. See CONVOY-FORK.md.)
 endif
 
@@ -61,7 +61,7 @@ help: ## Show this help
 	@echo "Convoy fork of postgis/docker-postgis — targets"
 	@echo "  (upstream targets build/test/push/all/update are also available via -include Makefile)"
 	@echo ""
-	@echo "Local entry point: 'gmake' on macOS (GNU Make 4.4+), 'make' on Linux."
+	@echo "Local entry point: 'gmake' on macOS (GNU Make 4.3+), 'make' on Linux."
 	@echo "Pinned tools cache: make tools   (resolves .tools/cache/<host> from tools/tools.yaml)"
 	@echo ""
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n",$$1,$$2}'

@@ -1,0 +1,33 @@
+# Grype policy gate for the `convoy-postgres` published image (WU4 publish pipeline).
+#
+# This is a grype CONFIGURATION file — consumed via `grype <img> -c .grype/policy.yaml`
+# (grype has no separate --policy flag). The `make scan IMAGE=<ref>` gate (GNUmakefile)
+# invokes grype exactly this way. The file carries two things:
+#
+#   1. fail-on-severity — the HARD gate. Any vulnerability at or above this severity
+#      that is not on the ignore list below trips the gate (grype exits non-zero),
+#      and `make scan` / the publish workflow fail the publish job before signing.
+#   2. ignore — the documented ACCEPT-LIST. A vulnerability listed here is accepted
+#      with a recorded justification. Add an entry ONLY with an inline comment
+#      recording why (fixed-upstream-but-not-in-our-base, wontfix-because-X, etc.).
+#      The empty list below is the starting posture for the first tag (WU5): the
+#      gate is real, and the first scan surfaces the actual CVE set, which is then
+#      patched (base bump / package pin) or triaged into this list with a reason.
+#
+# Threshold choice: `high`. The base is `postgres:18-trixie` + PGDG PostGIS + a
+# source-built pgmq; the first scan at WU5's tag cut surfaces the real CVE set,
+# which is then patched or recorded here. Lowering to `critical` would weaken the
+# gate; keep `high` and triage exceptions into the ignore list with justifications.
+#
+# Reference: https://oss.anchore.com/docs/reference/grype/configuration/
+fail-on-severity: "high"
+
+# Triaged accept-list. Empty by design at WU4 (the gate ships live; WU5's first
+# tag populates real exceptions here). Each entry MUST carry a justification.
+ignore: []
+# Example shape (add real triaged exceptions at WU5):
+#   - vulnerability: "CVE-XXXX-YYYYY"
+#     package:
+#       name: "libfoo"
+#     # Triaged 2026-MM-DD: fixed upstream in postgres:18-trixie roll X;
+#     # this image pins Y until the next compound-tag cut (ENG-521).

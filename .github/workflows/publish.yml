@@ -63,13 +63,12 @@ env:
 jobs:
   publish:
     # Skip Docker build and push for Dependabot
-    if: github.actor != 'dependabot[bot]'
+    if: ${{ github.actor != 'dependabot[bot]' && github.repository == 'convoyai-public/docker-postgis' }}
     name: publish (multi-arch build + triple-registry sign)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     # Only the canonical fork publishes; a fork tag-push has no org secrets and
     # must never attempt a release.
-    if: github.repository == 'convoyai-public/docker-postgis'
     steps:
       - name: Checkout
         # actions/checkout v6.1

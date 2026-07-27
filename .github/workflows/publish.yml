@@ -1,0 +1,246 @@
+# Convoy convoy-postgres publish pipeline (WU4 / ENG-520).
+#
+# Tag-only release. A compound-tag push (PG-major – PostGIS – pgmq, e.g.
+# 18-3.6-pgmq1.10) builds the multi-arch (linux/amd64,linux/arm64) product image
+# (dockerfiles/18-3.6.dockerfile, the WU3 pgmq-bearing image), publishes it to
+# Google Artifact Registry (primary) + Docker Hub + GHCR, then runs the publish
+# gates via Make: Grype policy scan, Syft CycloneDX SBOM, keyless cosign sign +
+# SBOM attest, and a cross-registry manifest-parity check. NO `latest` tag is
+# ever emitted or pushed to any registry (docker/metadata-action type=ref,event=tag
+# only — the no-latest step below asserts it at run time).
+#
+# Topology (corrects the convoy-deploy spec/TOOLSPEC, which are wrong on registry
+# topology; the correction lands in a companion convoy-deploy PR): GAR is PRIMARY,
+# this is TRIPLE publish (not dual). Signing for the IMAGE pipeline is KEYLESS
+# cosign (OIDC); key-based cosign still governs the separate Phase 3
+# convoy-deploy blob/convoyctl path (out of scope here).
+#
+# TOOLSPEC reconciliation: "Workflow YAML owns runner/permission/cache/artifact
+# plumbing only." The irreducible docker-action plumbing (logins, QEMU, buildx,
+# metadata, build-push) lives here; the GATES (scan/sbom/sign/parity) live in
+# GNUmakefile and use the already-pinned tools (grype/syft/cosign) resolved from
+# the tools/tools.yaml cache. The publish job runs the gates and fails the job on
+# any scan-policy / signing / parity failure (WU4 acceptance).
+#
+# Registry credentials are provisioned at the convoyai-public org:
+#   vars:    DH_USER_MARK, DH_REPO_MARK, GHA_GAR_HOST, GHA_GAR_PATH
+#   secrets: DH_PAT_MARK, GHA_GAR_CONTAINER_PUBLISH_KEY (GCP SA JSON — sensitive)
+# Referenced ONLY via ${{ vars.* }} / ${{ secrets.* }}; never echoed or logged.
+name: publish
+
+on:
+  push:
+    tags:
+      # Compound tag scheme: <PG-major>-<postgis>-<pgmq>, e.g. 18-3.6-pgmq1.10.
+      # The 18-*-* glob requires two dashes after "18-", so it matches the compound
+      # scheme but NOT a plain upstream-style "18-3.6" tag. WU5 (ENG-521) cuts the
+      # first tag; this workflow only fires it.
+      - "18-*-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write # GHCR push
+  attestations: write # build-push-action provenance/SBOM attestations
+  id-token: write # keyless cosign (sigstore Fulcio) + buildx provenance
+
+# A publish is a release mutation: never cancel one mid-flight.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: convoy-postgres
+  DOCKERFILE: dockerfiles/18-3.6.dockerfile
+
+jobs:
+  publish:
+    name: publish (multi-arch build + triple-registry sign)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # Only the canonical fork publishes; a fork tag-push has no org secrets and
+    # must never attempt a release.
+    if: github.repository == 'convoyai-public/docker-postgis'
+    steps:
+      - name: Checkout
+        # actions/checkout v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Provide GNU Make 4.4+
+        uses: ./.github/actions/provision-make
+
+      - name: Populate pinned tool cache
+        # grype/syft/cosign (the publish gates) resolve from the same cache the
+        # static validators use. tools/tools.yaml is authoritative in CI.
+        run: make tools
+
+      # --- Registry logins (triple) + GCP auth for GAR ------------------------
+      - name: Login to Docker Hub
+        # docker/login-action v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
+        with:
+          username: ${{ vars.DH_USER_MARK }}
+          password: ${{ secrets.DH_PAT_MARK }}
+
+      - name: Login to GHCR
+        # docker/login-action v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Authenticate to Google Cloud (GAR)
+        # google-github-actions/auth v2 — key-based SA auth for GAR push.
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          credentials_json: ${{ secrets.GHA_GAR_CONTAINER_PUBLISH_KEY }}
+
+      - name: Login to GAR
+        # docker/login-action v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
+        with:
+          registry: ${{ vars.GHA_GAR_HOST }}
+          username: _json_key
+          password: ${{ secrets.GHA_GAR_CONTAINER_PUBLISH_KEY }}
+
+      # --- Multi-arch build + triple-registry push ----------------------------
+      - name: Set up QEMU
+        # docker/setup-qemu-action v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - name: Set up Docker Buildx
+        # docker/setup-buildx-action v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Extract metadata (compound tag only — NO latest)
+        id: meta
+        # docker/metadata-action v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: |
+            ${{ vars.GHA_GAR_HOST }}/${{ vars.GHA_GAR_PATH }}/${{ env.IMAGE_NAME }}
+            ${{ vars.DH_REPO_MARK }}/${{ env.IMAGE_NAME }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          # type=ref,event=tag emits exactly the pushed compound tag for every
+          # image. Crucially NO type=raw,value=latest, NO type=edge — latest is
+          # never emitted. The no-latest assertion below enforces it at run time.
+          tags: |
+            type=ref,event=tag
+
+      - name: Build and push (multi-arch, triple registry)
+        id: build
+        # docker/build-push-action v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+
+      # Hard no-latest assertion: metadata-action must not have emitted `latest`
+      # for any image. Guards the AC "No floating latest in either registry" at
+      # run time — a regression in metadata-action config or a stray tag line
+      # trips it before any downstream gate runs.
+      - name: Assert no `latest` tag was emitted
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # metadata-action emits <repo>:<tag> refs, one per line. A forbidden
+          # `latest` therefore appears as a line ending in `:latest`. This anchor
+          # avoids false positives on legitimate tags (e.g. pgmq1.10) and is
+          # case-insensitive so `Latest`/`LATEST` trip too.
+          if grep -Eiq ':latest[[:space:]]*$' <<<"$TAGS"; then
+            echo "publish: metadata-action emitted a 'latest' tag, which is forbidden:" >&2
+            printf '%s\n' "$TAGS" >&2
+            exit 1
+          fi
+          echo "publish: no 'latest' tag emitted (ok)"
+
+      - name: Resolve published refs
+        id: refs
+        env:
+          TAG: ${{ steps.meta.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          GAR_REPO: ${{ vars.GHA_GAR_HOST }}/${{ vars.GHA_GAR_PATH }}/${{ env.IMAGE_NAME }}
+          DH_REPO: ${{ vars.DH_REPO_MARK }}/${{ env.IMAGE_NAME }}
+          GHCR_REPO: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          : "${TAG:?metadata version (tag) missing}"
+          : "${DIGEST:?build manifest digest missing}"
+          {
+            echo "tag=${TAG}"
+            echo "digest=${DIGEST}"
+            # Digest-pinned refs (canonical for scan/sbom/sign; sign signs the digest).
+            echo "gar_ref=${GAR_REPO}@${DIGEST}"
+            echo "dh_ref=${DH_REPO}@${DIGEST}"
+            echo "ghcr_ref=${GHCR_REPO}@${DIGEST}"
+            # Tag-form refs (parity resolves tag -> manifest).
+            echo "gar_tag=${GAR_REPO}:${TAG}"
+            echo "dh_tag=${DH_REPO}:${TAG}"
+            echo "ghcr_tag=${GHCR_REPO}:${TAG}"
+          } >>"$GITHUB_OUTPUT"
+
+      # --- Publish gate 1: Grype policy scan ----------------------------------
+      # Scans one registry's digest-pinned image (the manifest is digest-identical
+      # across all three); .grype/policy.yaml is the gate. Fails the job before
+      # signing on a policy trip. `make scan` resolves the pinned grype.
+      - name: Scan (grype policy gate)
+        env:
+          IMAGE: ${{ steps.refs.outputs.ghcr_ref }}
+        run: make scan IMAGE="$IMAGE"
+
+      # --- Publish gate 2: Syft CycloneDX SBOM --------------------------------
+      - name: SBOM (syft cyclonedx)
+        env:
+          IMAGE: ${{ steps.refs.outputs.ghcr_ref }}
+        run: make sbom IMAGE="$IMAGE" OUTPUT=sbom.cyclonedx.json
+
+      - name: Upload SBOM artifact
+        # actions/upload-artifact v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sbom-cyclonedx-${{ steps.refs.outputs.tag }}
+          path: sbom.cyclonedx.json
+          if-no-files-found: error
+
+      # --- Publish gate 3: keyless cosign sign + SBOM attest (per registry) ---
+      # Sign + attest each registry's digest-pinned ref independently so each
+      # carries its own signature + SBOM attestation. cosign auto-detects the
+      # GitHub OIDC endpoint (id-token: write is set above). `make sign` resolves
+      # the pinned cosign.
+      - name: Sign + attest (GAR)
+        env:
+          REF: ${{ steps.refs.outputs.gar_ref }}
+        run: make sign REF="$REF" SBOM=sbom.cyclonedx.json
+      - name: Sign + attest (Docker Hub)
+        env:
+          REF: ${{ steps.refs.outputs.dh_ref }}
+        run: make sign REF="$REF" SBOM=sbom.cyclonedx.json
+      - name: Sign + attest (GHCR)
+        env:
+          REF: ${{ steps.refs.outputs.ghcr_ref }}
+        run: make sign REF="$REF" SBOM=sbom.cyclonedx.json
+
+      # --- Publish gate 4: cross-registry manifest parity ---------------------
+      # Resolves each tag-form ref to its raw manifest and asserts byte-identity
+      # across GAR + Docker Hub + GHCR. Fails the job on any divergence.
+      - name: Registry parity
+        env:
+          TAG: ${{ steps.refs.outputs.tag }}
+          REF_GAR: ${{ steps.refs.outputs.gar_tag }}
+          REF_DH: ${{ steps.refs.outputs.dh_tag }}
+          REF_GHCR: ${{ steps.refs.outputs.ghcr_tag }}
+        run: |
+          make parity \
+            TAG="$TAG" \
+            REF_GAR="$REF_GAR" \
+            REF_DH="$REF_DH" \
+            REF_GHCR="$REF_GHCR"

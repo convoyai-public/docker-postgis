@@ -8,11 +8,13 @@ generated Dockerfiles, the `update.sh` generator, and the per-version image
 recipes; this fork layers Convoy's packaging, validation, and release concerns
 on top without reimplementing upstream's work.
 
-The **published image name is `convoy-postgres`**. The publishing org (GHCR
-primary + Docker Hub mirror), dual-registry parity, SBOM/provenance, and cosign
-signing are established in WU4 of the convoy-deploy Phase 1 plan and are
-**out of scope** for this work unit (WU1). WU1 only stands up the repo substrate,
-the local validation/tooling scaffold, and thin CI.
+The **published image name is `convoy-postgres`**. The publishing topology,
+multi-registry parity, SBOM/provenance, and cosign signing are established in
+WU4 of the convoy-deploy Phase 1 plan and are **out of scope** for this work
+unit (WU1). WU1 only stands up the repo substrate, the local validation/tooling
+scaffold, and thin CI. (WU4 landed GAR-primary triple publish + keyless cosign;
+see the [WU4 design record](#wu4-pr-validation--signed-multi-registry-multi-arch-publish-pipeline)
+for the authoritative topology.)
 
 The authoritative tooling policy is
 [`convoy-deploy`'s `specs/TOOLSPEC.md`](https://github.com/convoyai/convoy-deploy/blob/main/specs/TOOLSPEC.md),
@@ -101,10 +103,12 @@ layers Convoy targets on top:
 | `build-multiarch` | Assemble a local **multi-arch manifest** (`linux/amd64,linux/arm64`) to an OCI-layout tarball under `build/` **without publishing**. Proves both arches build into one manifest. |
 | `vendor-audit` | Report upstream commits on `upstream/master` not present on `convoy-vendor`. |
 | `presubmit` | Local equivalent of the fast PR tier: `validate` (shfmt + lints + `generated-check`) + `smoke-native` (runnable native-arch smoke). |
+| `scan` / `sbom` / `sign` / `parity` | WU4 **publish gates**: Grype policy scan, Syft CycloneDX SBOM, keyless cosign sign + attest, and cross-registry manifest parity. Invoked by the tag-triggered `publish.yml` after the multi-arch push; each fails the publish job on its respective regression. |
 
 Local **multi-arch assembly** (`build-multiarch`) and **runnable per-arch smoke**
-(`smoke-*`) are WU2. **Publish, sign, and registry** targets remain **WU4** and
-are intentionally absent here; `build-multiarch` writes only a local OCI tarball.
+(`smoke-*`) are WU2. The **publish gates** (`scan` / `sbom` / `sign` / `parity`)
+are WU4 and are invoked by `.github/workflows/publish.yml`; `build-multiarch`
+writes only a local OCI tarball and never publishes.
 
 ## Validation scoping (important)
 
@@ -286,3 +290,92 @@ not a C compile.
 actual tag; WU3 only captures the version. The Phase 1 plan's `1.5`/`pgmq1.5`
 placeholders were illustrative (`e.g.`); `1.10.0` is the pinned reality recorded
 here.
+
+## WU4: PR validation + signed multi-registry multi-arch publish pipeline
+
+ENG-520 stands up the tag-triggered publish pipeline for the `convoy-postgres`
+image. The PR-validation tier was already met by WU2/WU3: `ci.yml` runs
+`make presubmit` (= `validate` + `smoke-native`) on PR and push-to-main, and for
+this single-product repo `smoke-native` already builds AND RUNS the product image
+(18-3.6 + pgmq), so the PR tier's static-validation + native-extension-smoke +
+affected-build obligations are covered. WU4 does not duplicate that tier; its
+focus is the new **`.github/workflows/publish.yml`** and the four publish gates
+in `GNUmakefile`.
+
+**Material deviation from spec — authorized.** `convoy-deploy`'s `TOOLSPEC.md`
+is inaccurate on registry topology (it says GHCR is primary and the publish is
+dual-registry). The corrected reality — implemented here and landed in a
+companion convoy-deploy PR — is: **Google Artifact Registry (GAR) is primary**,
+this is **triple publish** (GAR + Docker Hub + GHCR), and image-pipeline signing
+is **keyless cosign (OIDC)**, not key-based. (Key-based cosign still governs the
+separate Phase 3 convoy-deploy blob/convoyctl path and is out of scope here.)
+
+**Trigger.** `on.push.tags: ['18-*-*']` filtered to the compound scheme, plus
+`workflow_dispatch`. The `18-*-*` glob requires two dashes after `18-`, so it
+matches `18-3.6-pgmq1.10` but not a plain upstream-style `18-3.6` tag. **No tag
+is cut in this WU** — cutting the first compound tag is WU5/ENG-521; this WU
+only ships the pipeline that fires it.
+
+**Design notes:**
+
+- **Registries (triple).** GAR primary
+  `${GHA_GAR_HOST}/${GHA_GAR_PATH}/convoy-postgres`
+  (`us-central1-docker.pkg.dev/containerhosting/convoy`), Docker Hub
+  `${DH_REPO_MARK}/convoy-postgres`, GHCR
+  `ghcr.io/${github.repository_owner}/convoy-postgres`. Three `docker/login-action`
+  steps; GAR uses `google-github-actions/auth@v2` with a service-account JSON key
+  (`GHA_GAR_CONTAINER_PUBLISH_KEY`) then `docker/login-action` with
+  `username: _json_key`.
+- **Tag — compound tag ONLY, no `latest`.** `docker/metadata-action` with
+  `type=ref,event=tag` emits exactly the pushed compound tag for every image.
+  There is deliberately **no** `type=raw,value=latest` and **no** `type=edge`.
+  A run-time **no-latest assertion** step greps `metadata-action`'s emitted tags
+  and fails the job if any `latest` slipped through, guarding the AC "No floating
+  latest in either registry" defensively.
+- **Multi-arch.** `linux/amd64,linux/arm64` via `docker/setup-qemu-action@v3` +
+  `docker/setup-buildx-action@v3` + `docker/build-push-action@v6`, `push: true`,
+  `file: dockerfiles/18-3.6.dockerfile` (the WU3 product Dockerfile), context `.`.
+  Portable docker/* actions on `ubuntu-24.04` (NOT Blacksmith-wired; core-platform
+  runs Blacksmith actions, which are not available to this repo).
+- **Provenance/SBOM.** `provenance: mode=max`, `sbom: true` on build-push-action;
+  `permissions: { attestations: write, id-token: write }`.
+- **Gates live in `GNUmakefile`; plumbing in YAML** (TOOLSPEC). The irreducible
+  docker-action plumbing is in `publish.yml`; the four gates (`scan` / `sbom` /
+  `sign` / `parity`) are Make targets over the **already-pinned** tools
+  (`grype`/`syft`/`cosign` in `BINARY_TOOLS`), each a thin `scripts/publish-*.sh`
+  helper. The publish job runs the gates sequentially and **fails the job** on any
+  scan-policy / signing / parity failure (WU4 AC).
+- **Grype policy gate.** grype has **no `--policy` flag**; its policy mechanism
+  is a configuration file consumed via `-c`. `.grype/policy.yaml` is that config:
+  `fail-on-severity: high` is the hard gate, and `ignore: []` is the documented
+  accept-list (empty at WU4 by design — the gate ships live; WU5's first scan
+  surfaces the real CVE set, which is then patched or triaged into `ignore` with
+  a per-entry justification). `make scan IMAGE=<ref>` runs
+  `grype <ref> -c .grype/policy.yaml`.
+- **SBOM.** Pinned **syft** CycloneDX JSON (`make sbom IMAGE=<ref> OUTPUT=...`),
+  retained as a workflow artifact and fed to the cosign attest gate. syft scans
+  the runner's default platform (amd64 on `ubuntu-24.04`); a per-arch SBOM is a
+  future refinement, WU4 ships a single SBOM per the plan's acceptance criterion.
+- **Signing — keyless cosign.** `make sign REF=<ref> SBOM=...` runs
+  `cosign sign --yes <ref>` then `cosign attest --yes --predicate <sbom> --type
+  cyclonedx <ref>` per registry ref (3×), using the **pinned cosign** from
+  `tools.yaml`. Keyless is default in cosign v3; cosign auto-detects GitHub OIDC
+  from the runner when `id-token: write` is granted. The digest-pinned ref
+  (`repo@sha256:...`) is the canonical signing target.
+- **Registry parity.** `make parity` resolves each tag-form ref to its raw
+  manifest via `docker buildx imagetools inspect --raw` and asserts the three raw
+  manifests are byte-identical (the manifest digest IS sha256 of the raw
+  manifest, so byte-identity implies digest-identity). Version-independent — no
+  dependence on buildx Go-template field names — and fails closed.
+- **ARM test posture for 18-3.6.** Per the WU2 record, the apt-based `18-3.6`
+  image has no fragile ARM source-build test surface, so there is nothing to
+  relax into a warn here. The runnable extension smoke (run in `ci.yml` /
+  `smoke-*`) fully gates; the publish pipeline does not re-run it (the image
+  bytes it publishes are the ones the PR tier already smoke-tested).
+- **Verification posture for this WU.** A tag-triggered publish workflow does not
+  fire on a PR, and no tag is cut here (WU5). "Done" for WU4 is therefore:
+  `make validate` green (actionlint + Zizmor + hadolint + shellcheck + shfmt +
+  gitleaks + markdownlint over the new YAML and scripts); `make presubmit` green
+  (nothing regressed); the four publish-gate targets are syntactically valid GNU
+  Make and resolve their pinned tools (`make tools-audit` shows them cached).
+  End-to-end publish verification is deferred to WU5's tag cut.

@@ -54,7 +54,8 @@ resolve = $(shell scripts/tools-resolve.sh $(1))
         validate format format-apply lint lint-shellcheck lint-dockerfile \
         lint-actionlint lint-zizmor lint-gitleaks lint-markdownlint \
         generated-check smoke smoke-arm64 smoke-amd64 smoke-multiarch smoke-native \
-        build-multiarch vendor-audit presubmit
+        build-multiarch vendor-audit presubmit \
+        scan sbom sign parity
 
 help: ## Show this help
 	@echo "Convoy fork of postgis/docker-postgis — targets"
@@ -215,3 +216,33 @@ vendor-audit: ## Report upstream commits not yet on convoy-vendor
 # emulation), proving the product image is runnable, not merely buildable.
 presubmit: validate smoke-native ## validate (shfmt + lints + generated-check) + native runnable smoke
 	@echo "presubmit: all Convoy gates green."
+
+# --- WU4: publish gates (scan / sbom / sign / parity) ---------------------------
+# The tag-triggered publish pipeline (`.github/workflows/publish.yml`) pushes the
+# multi-arch (amd64+arm64) manifest to GAR + Docker Hub + GHCR via
+# docker/build-push-action, then invokes these gates. Each gate fails the publish
+# job on a scan-policy / signing / parity regression. The pinned tools
+# (grype/syft/cosign) resolve from the same tools/tools.yaml cache the static
+# validators use; CI runs `make tools` first. End-to-end exercise is WU5 (the
+# first compound-tag cut); these targets are the executable gate contract.
+#
+# Inputs (set on the make command line, as the publish workflow does):
+#   IMAGE   digest-pinned single ref to scan / build an SBOM for   (scan, sbom)
+#   OUTPUT  SBOM output path                                       (sbom)
+#   REF     digest-pinned ref to sign + attest                     (sign)
+#   SBOM    SBOM path to attest                                    (sign)
+#   TAG     the compound tag                                       (parity)
+#   REF_GAR / REF_DH / REF_GHCR  the three registry tag-form refs  (parity)
+GRYPE_POLICY := .grype/policy.yaml
+
+scan: ## Grype vulnerability scan with checked-in policy gate (publish gate)
+	@GRYPE="$(call resolve,grype)" scripts/publish-scan.sh "$(IMAGE)" "$(GRYPE_POLICY)"
+
+sbom: ## Generate a Syft CycloneDX SBOM for the published image (publish gate)
+	@SYFT="$(call resolve,syft)" scripts/publish-sbom.sh "$(IMAGE)" "$(OUTPUT)"
+
+sign: ## Cosign keyless sign + CycloneDX SBOM attest of one published ref (publish gate)
+	@COSIGN="$(call resolve,cosign)" scripts/publish-sign.sh "$(REF)" "$(SBOM)"
+
+parity: ## Assert the published manifest is byte-identical across GAR + Docker Hub + GHCR (publish gate)
+	@scripts/publish-parity.sh "$(TAG)" "$(REF_GAR)" "$(REF_DH)" "$(REF_GHCR)"

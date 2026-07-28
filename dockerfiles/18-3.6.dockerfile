@@ -24,7 +24,9 @@ FROM postgres:18-trixie AS pgmq-builder
 # volatile apt versions here would churn without benefit). --no-install-recommends
 # keeps the layer minimal; list cleanup prevents apt cache leakage.
 # hadolint ignore=DL3008
+# Do an unconditional apt upgrade to try to fix as many security vulns as possible
 RUN apt-get update \
+    && apt-get upgrade -y \
 	&& apt-get install -y --no-install-recommends \
 		build-essential \
 		postgresql-server-dev-18 \
@@ -54,7 +56,9 @@ ENV POSTGIS_VERSION=3.6.4+dfsg-2.pgdg13+1
 # --no-install-recommends, list cleanup). ca-certificates and the -scripts
 # package are unpinned to match upstream exactly.
 # hadolint ignore=DL3008
+# Do an unconditional apt upgrade to try to fix as many security vulns as possible
 RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
 	&& apt-cache showpkg "postgresql-${PG_MAJOR}-postgis-${POSTGIS_MAJOR}" \
 	&& apt-get install -y --no-install-recommends \
 		ca-certificates \

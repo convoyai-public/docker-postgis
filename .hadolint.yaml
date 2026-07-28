@@ -12,3 +12,6 @@ no-color: false
 no-fail: false
 trustedRegistries:
   - docker.io
+ignored:
+  # Disable pinned packages to avoid maintenance nightmare and allow blanket updates
+  - DL3008

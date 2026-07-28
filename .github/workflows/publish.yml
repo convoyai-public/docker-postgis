@@ -76,8 +76,8 @@ jobs:
         with:
           persist-credentials: false
 
-      #- name: Provide GNU Make 4.4+
-      #  uses: ./.github/actions/provision-make
+      # - name: Provide GNU Make 4.4+
+      #   uses: ./.github/actions/provision-make
 
       - name: Populate pinned tool cache
         # grype/syft/cosign (the publish gates) resolve from the same cache the

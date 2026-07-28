@@ -32,8 +32,8 @@ jobs:
       # official 4.4.1 release with its dependency-free bootstrap (build.sh),
       # sha256-verified. Shared composite action keeps ci.yml and vendor-audit.yml
       # in lockstep.
-      - name: Provide GNU Make 4.4+
-        uses: ./.github/actions/provision-make
+      # - name: Provide GNU Make 4.4+
+      #   uses: ./.github/actions/provision-make
 
       # Populate the pinned tool cache from tools/tools.yaml (authoritative in CI).
       - name: Populate pinned tool cache

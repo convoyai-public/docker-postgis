@@ -140,13 +140,18 @@ jobs:
             ${{ vars.GHA_GAR_HOST }}/${{ vars.GHA_GAR_PATH }}/${{ env.IMAGE_NAME }}
             ${{ vars.DH_REPO_MARK }}/${{ env.IMAGE_NAME }}
             ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          # We have to explicitly omit the latest tag
+          flavor: |
+            latest=false
           # type=ref,event=tag emits exactly the pushed compound tag for every
           # image. Crucially NO type=raw,value=latest, NO type=edge — latest is
           # never emitted. The no-latest assertion below enforces it at run time.
+          # But we cannot use type=ref for our multi-push useage, we have to use
+          # type=raw
           tags: |
             type=raw,value=${{ github.ref_name }}
-            # type=raw,value=latest
-            # type=ref,event=tag
+          # type=raw,value=latest
+          # type=ref,event=tag
 
       - name: Set up QEMU
         # docker/setup-qemu-action v4.2.0

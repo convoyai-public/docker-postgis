@@ -388,8 +388,9 @@ cuts or publishes a tag. The pipeline this procedure drives — multi-arch build
 triple-registry push, and the four publish gates — is designed and documented in
 the [WU4 section](#wu4-pr-validation--signed-multi-registry-multi-arch-publish-pipeline);
 this section tells the operator how to drive it and does not re-explain the
-pipeline design. The first release cut by this procedure is the **Phase 1
-pivot** (WU5/ENG-521): the compound tag the WU6/WU7/WU8 consumers pin to.
+pipeline design. The first release cut by this procedure was the **Phase 1
+pivot** (WU5/ENG-521): the compound tag `18-3.6-pgmq1.10`, now published and
+pinned to by the WU6/WU7/WU8 consumers.
 
 ### Tag scheme
 
@@ -406,17 +407,22 @@ recorded in the [WU3 section](#wu3-pgmq-bundling-into-the-image). The first cut:
 so it matches `18-3.6-pgmq1.10` but not a plain upstream-style `18-3.6` tag — a
 mistagged `18-3.6` will not fire the pipeline.
 
-**No floating `latest` is ever published.** `docker/metadata-action` is
-configured with `type=ref,event=tag` only (no `type=raw,value=latest`, no
-`type=edge`), and a run-time assertion in `publish.yml` fails the job if any
-`latest` tag is emitted. Consumers always pin an exact compound tag.
+**No floating `latest` is ever published.** `docker/metadata-action` emits the
+tag with **`type=raw,value=<tag>`** (not `type=ref,event=tag`) plus
+**`flavor: latest=false`**. `type=ref` does not behave correctly across a
+multi-registry push — GHCR's distinct naming in particular — so the tag value is
+given explicitly per image. A run-time assertion in `publish.yml` still fails the
+job if any `latest` tag is emitted. Consumers always pin an exact compound tag.
 
 ### Pre-flight (recommended)
 
-Before tagging, surface the Grype CVE set locally so the first publish's scan is
-clean. The publish gate (`.grype/policy.yaml`) ships with
-`fail-on-severity: high` and `ignore: []` — the gate is real and the accept-list
-is empty by design; WU5's first scan surfaces the actual CVE set.
+Before tagging, surface the Grype CVE set locally so the publish scan is clean.
+The publish gate (`.grype/policy.yaml`) enforces `fail-on-severity: high` against
+an `ignore:` accept-list. The first release (WU5) populated that list with the
+base image's gating CVEs, each with a dated justification — enough for a clean
+CI today, but known container-security debt tracked in ENG-578 (the long-term
+fix is a different base image derivation). Re-scan on every base bump and prune
+remediated entries.
 
 ```bash
 make smoke-native   # builds AND RUNS the product image on the daemon-native arch

@@ -483,6 +483,16 @@ pull refs for `18-3.6-pgmq1.10`:
 | Docker Hub | `${DH_REPO_MARK}/convoy-postgres:18-3.6-pgmq1.10` |
 | GHCR | `ghcr.io/convoyai-public/convoy-postgres:18-3.6-pgmq1.10` |
 
+> **GHCR package visibility is `public`.** The `convoyai-public/convoy-postgres`
+> GHCR package is set public (2026-07-29) so cross-org consumer CI can pull it
+> without a per-repo grant: consumer repos live in the `convoyai` org (e.g.
+> `convoyai/core-platform`, `convoyai/data-platform`), a different org than the
+> package's `convoyai-public`. GitHub denies that cross-org pull and **masks the
+> denial as `manifest unknown`** — it looks like a bad tag/digest but the pinned
+> digest is correct. GitHub exposes no REST/GraphQL API to change an
+> org-package's visibility; it is a web-UI "Danger Zone" toggle on the package
+> only. (Docker Hub is already public; GAR needs Workload-Identity auth.)
+
 `GHA_GAR_HOST`/`GHA_GAR_PATH` and `DH_REPO_MARK` are provisioned as
 `convoyai-public` org variables; this document names the variables rather than
 fabricating the Docker Hub namespace. Reconciliation: the Linear AC's literal

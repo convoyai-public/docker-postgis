@@ -55,7 +55,8 @@ resolve = $(shell scripts/tools-resolve.sh $(1))
         lint-actionlint lint-zizmor lint-gitleaks lint-markdownlint \
         generated-check smoke smoke-arm64 smoke-amd64 smoke-multiarch smoke-native \
         build-multiarch vendor-audit presubmit \
-        scan sbom sign parity
+        scan sbom sign parity \
+        compat compat-build compat-glitchtip compat-umami compat-prefect
 
 help: ## Show this help
 	@echo "Convoy fork of postgis/docker-postgis — targets"
@@ -246,3 +247,45 @@ sign: ## Cosign keyless sign + CycloneDX SBOM attest of one published ref (publi
 
 parity: ## Assert the published manifest is byte-identical across GAR + Docker Hub + GHCR (publish gate)
 	@scripts/publish-parity.sh "$(TAG)" "$(REF_GAR)" "$(REF_DH)" "$(REF_GHCR)"
+
+# --- WU6: extension-compatibility scenarios -----------------------------------
+# Repeatable container scenarios that confirm the convoy-postgres product image
+# (PG18 + PostGIS 3.6 + pgmq 1.10) satisfies GlitchTip, Umami, and Prefect's
+# Postgres expectations at the MIGRATION level — isolating whether each add-on's
+# ORM/migration engine (Django/Prisma/Alembic) accepts PG18. Full-app HTTP boot,
+# Valkey/Redis, and workers are out of scope; the migration step is the probe.
+# scripts/compat-run.sh is the executable driver. NOT part of presubmit/validate
+# (heavy + 3rd-party-dependent); runs via .github/workflows/compat.yml
+# (scheduled/dispatch/tag) or explicit `make compat`.
+COMPAT_VERSION := 18-3.6
+COMPAT_TAG     := convoy-postgres:$(COMPAT_VERSION)-compat
+COMPAT_RESULTS := build/compat-results.json
+
+# Build the product image once (daemon-native arch, loadable) tagged for compat.
+# Mirrors smoke-native's build but tags -compat so the scenarios share one image.
+compat-build:
+	@arch=$$(docker info --format '{{.Architecture}}' \
+		| sed -e 's/aarch64/arm64/' -e 's/x86_64/amd64/'); \
+	echo "[compat] BUILD product image (linux/$$arch) -> $(COMPAT_TAG)"; \
+	$(DOCKER) buildx build --platform "linux/$$arch" --load \
+		-f $(SMOKE_DOCKERFILE) -t $(COMPAT_TAG) $(SMOKE_CTX_ROOT)
+
+compat-glitchtip: compat-build ## Compat scenario: GlitchTip (Django) migrate vs convoy-postgres
+	@scripts/compat-run.sh glitchtip "$(COMPAT_RESULTS)"
+
+compat-umami: compat-build ## Compat scenario: Umami (Prisma) migrate vs convoy-postgres
+	@scripts/compat-run.sh umami "$(COMPAT_RESULTS)"
+
+compat-prefect: compat-build ## Compat scenario: Prefect (Alembic) migrate vs convoy-postgres
+	@scripts/compat-run.sh prefect "$(COMPAT_RESULTS)"
+
+compat: compat-build ## Run all three compat scenarios (GlitchTip + Umami + Prefect); prints the JSON matrix
+	@rm -f "$(COMPAT_RESULTS)"
+	@scripts/compat-run.sh glitchtip "$(COMPAT_RESULTS)" \
+		|| echo "[compat] glitchtip failed — continuing (honest matrix)"
+	@scripts/compat-run.sh umami "$(COMPAT_RESULTS)" \
+		|| echo "[compat] umami failed — continuing (honest matrix)"
+	@scripts/compat-run.sh prefect "$(COMPAT_RESULTS)" \
+		|| echo "[compat] prefect failed — continuing (honest matrix)"
+	@echo "[compat] RESULTS -> $(COMPAT_RESULTS)"
+	@jq . "$(COMPAT_RESULTS)" 2>/dev/null || cat "$(COMPAT_RESULTS)"

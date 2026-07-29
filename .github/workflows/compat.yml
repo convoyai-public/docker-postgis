@@ -1,0 +1,64 @@
+# Scheduled + dispatch + on-tag extension-compatibility scenarios (WU6 / ENG-522).
+#
+# Runs `make compat`, which builds the convoy-postgres product image locally
+# (dockerfiles/18-3.6.dockerfile — the exact bytes WU5 publishes; no registry
+# pull keeps CI deterministic) and exercises three add-on migration scenarios
+# against it: GlitchTip (Django), Umami (Prisma), and Prefect (Alembic). Each
+# scenario brings up a convoy-postgres container, runs the add-on's migration,
+# and asserts the expected DB schema — isolating whether each ORM/migration
+# engine accepts PostgreSQL 18.
+#
+# Posture mirrors vendor-audit.yml: scheduled (weekly, off-peak cron) +
+# workflow_dispatch + tag push. It does NOT run on PRs and is NOT part of
+# presubmit/validate (the scenarios are heavy + 3rd-party-dependent). The
+# structured JSON results + per-scenario logs are uploaded as artifacts.
+#
+# An HONEST pass/fail is the deliverable: a scenario may fail (e.g. an ORM
+# rejecting PG18) without failing this workflow — the matrix documents it.
+# `make compat` records each result regardless and never aborts on the first
+# failure, so a single fail does not mask the other two results.
+name: compat
+
+on:
+  schedule:
+    - cron: '23 7 * * 1' # weekly, Monday 07:23 UTC
+  workflow_dispatch:
+  push:
+    tags:
+      # Same compound-tag glob as publish.yml; fires alongside a release so the
+      # compat matrix tracks the image consumers actually pin.
+      - '18-*-*'
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    name: compat (GlitchTip + Umami + Prefect migrate vs convoy-postgres)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        # actions/checkout v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Populate pinned tool cache
+        # Static validators resolve from the cache; compat itself uses docker +
+        # jq (host prerequisites) and the product Dockerfile (no new toolchain).
+        run: make tools
+
+      - name: Run compatibility scenarios
+        run: make compat
+
+      - name: Upload results + logs
+        # actions/upload-artifact v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: compat-results
+          path: |
+            build/compat-results.json
+            build/compat-*.log
+          if-no-files-found: warn

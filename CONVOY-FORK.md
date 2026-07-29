@@ -593,3 +593,104 @@ If the publish scan trips, the publish job fails before signing. Recover:
 This delete-and-recreate is acceptable **only** for the first, pre-consumer tag.
 Later releases must never rewrite a published tag — once WU7/WU8 pin a tag, its
 digest is immutable, and a fix ships as the next compound tag.
+
+## WU6: Extension-compatibility confirm (GlitchTip, Umami, Prefect)
+
+ENG-522 carries forward REPO-DESIGN's open item: confirm the `convoy-postgres`
+image (PG18 + PostGIS 3.6 + pgmq 1.10) satisfies the three Convoy add-ons'
+Postgres expectations **now**, via repeatable container scenarios, so Phase N1
+(Add-on Profiles) does not discover a PG incompatibility late. The deliverable
+is an **HONEST pass/fail matrix** with machine-readable results retained as CI
+artifacts — a migration failure (e.g. an ORM rejecting PG18) is a valid,
+valuable outcome documented with a remediation path, not a forced-green gate.
+
+### Verification depth = migrate + DB-schema proof
+
+Each scenario brings up a `convoy-postgres` container, runs the add-on's
+migration against it, then **asserts the expected schema tables exist in the
+DB** (DB-side proof of a clean migration). The signal this isolates is whether
+the add-on's ORM/migration engine (Django / Prisma / Alembic) accepts
+PostgreSQL 18 — not full-app HTTP health, Valkey/Redis, or worker boot. Full-app
+startup depends on Redis/Valkey and other infra unrelated to PG compatibility;
+the migration step is the clean PG-compat probe.
+
+### Image under test
+
+The scenarios build `dockerfiles/18-3.6.dockerfile` locally (the WU3
+pgmq-bearing product image — the exact bytes WU5 publishes), tagged
+`convoy-postgres:18-3.6-compat` for the daemon-native arch via
+`docker buildx build --load`. The published tag is **not** pulled: this keeps
+the scenario deterministic (no registry auth, tracks in-PR Dockerfile changes)
+and is registry-parity-equivalent (WU5's gate already proved the published
+manifest is byte-identical to what this Dockerfile builds).
+
+### Scenario design
+
+`scripts/compat-run.sh <app>` is the driver. It mirrors `scripts/smoke-run.sh`:
+a dedicated docker network per run, a TCP readiness gate (`pg_isready -h
+127.0.0.1`, NOT bare `pg_isready` — the latter resolves the temp init-server
+Unix socket and reports a false ready before initdb finishes, the readiness
+race documented in the WU2 record), a trap that dumps container diagnostics on
+failure then cleans up, and `[compat-<app>]` markers on stdout.
+
+Per add-on, the driver isolates the migrate step by overriding the add-on
+container's entrypoint/cmd to run the migration directly (avoiding Redis/Valkey
+boot dependencies), then verifies DB-side schema via `psql` exec'd inside the
+PG container. Migration failures are captured gracefully (`set +e` around the
+migrate + assertion phase) and recorded as fail results — the script never
+aborts on a scenario failure, and the `make compat` target runs all three
+regardless so one fail does not mask the other two.
+
+Output is a JSON matrix at `build/compat-results.json` (gitignored, like the
+`build/*.oci.tar` multiarch output) capturing per-add-on: name, pinned
+image/version, status (pass/fail), migration_ok, schema tables verified, PG
+version, notes, and duration. The per-run migrate log is at
+`build/compat-<app>.log`. Both are uploaded as CI artifacts by
+`.github/workflows/compat.yml`.
+
+### Baseline matrix (WU6 snapshot)
+
+All three add-ons **pass** at WU6 time — their migration engines accept PG18:
+
+| Add-on | Pinned image | ORM / engine | Migration | Schema proof | PG version | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| GlitchTip | `glitchtip/glitchtip:6.2.2` | Django (SQL) | `python manage.py migrate` | `django_migrations` rows + `organizations_ext_organization` table (340 tables total) | PostgreSQL 18.4 | **PASS** |
+| Umami | `umamisoftware/umami:3.2.0` (Prisma 7.8.0) | Prisma `migrate deploy` | `npm run update-db` | `user` + `website` tables (20 tables + `_prisma_migrations`) | PostgreSQL 18.4 | **PASS** |
+| Prefect | `prefecthq/prefect:3.8.0-python3.12` | Alembic / SQLAlchemy | `prefect server database upgrade --yes` | `alembic_version` row + `flow_run` table | PostgreSQL 18.4 | **PASS** |
+
+No incompatibility was found. PG18 (18.4 specifically, the current
+`postgres:18-trixie` base) is accepted by Django's migration runner, Prisma
+7.8.0's migration engine (which introspects the PG catalog), and Prefect's
+Alembic/SQLAlchemy stack. The previously-flagged Prisma PG18 risk did not
+materialize: `prisma migrate deploy` ran cleanly and created all expected
+tables. There is no PN1 remediation item to carry forward on the PG axis.
+
+### Technical notes
+
+- **Prefect driver:** the `prefecthq/prefect` image ships `asyncpg`, **not**
+  `psycopg` (psycopg3). The connection URL must use the `postgresql+asyncpg://`
+  dialect; `postgresql+psycopg://` fails with `ModuleNotFoundError: No module
+  named 'psycopg'`. The driver is recorded in the scenario config.
+- **GlitchTip table name:** the org model is `ExtOrganization` (custom), so the
+  table is `organizations_ext_organization`, not `organizations_organization`.
+- **Umami v3 rename:** Umami v3 renamed the `account` table to `user`; the v2
+  `account` assertion does not apply.
+- **Migration isolation:** GlitchTip's start.sh runs migrate only when
+  `DYNO=web*`; the scenario overrides CMD to `python manage.py migrate` directly
+  (no entrypoint on the image). Umami's CMD (`npm run start-docker`) runs
+  `check-db` + `start-server`, not the migrate; the scenario runs `npm run
+  update-db` (= `prisma migrate deploy`) via `--entrypoint npm`. Prefect's
+  entrypoint (`tini + entrypoint.sh`) is bypassed via `--entrypoint prefect` to
+  run the CLI migrate directly.
+
+### CI posture
+
+`.github/workflows/compat.yml` mirrors `vendor-audit.yml`'s posture: weekly
+schedule (Monday 07:23 UTC, off-peak minute), `workflow_dispatch`, and tag push
+(`on.push.tags: ['18-*-*']`, same glob as `publish.yml`). It runs `make compat`
+and uploads the JSON results + scenario logs. It does **not** run on PRs and is
+**not** part of `presubmit`/`validate` (the scenarios are heavy +
+3rd-party-dependent). The workflow is **non-blocking**: `make compat` records
+each result and never aborts on the first failure, so a single fail does not
+mask the others or fail the CI job — the matrix is the evidence, uploaded as
+artifacts.
